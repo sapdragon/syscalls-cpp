@@ -14,6 +14,7 @@ You can combine any allocation policy with any stub generation policy.
 | ------------------ | ----------------------------------------------------- | 
 | `SectionAllocator` | `NtCreateSection` with `SEC_NO_CHANGE` flag           | 
 | `HeapAllocator`    | `HeapCreate` with `HEAP_CREATE_ENABLE_EXECUTE`        |
+| `VirtualMemoryAllocator`    | `NtAllocateVirtualMemory` (`RW` -> `RX`)       |
 
 #### Stub Generation Policies (`IsStubGenerationPolicy`)
 

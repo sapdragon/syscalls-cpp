@@ -96,6 +96,53 @@ namespace syscall
             }
         };
 
+        struct VirtualMemoryAllocator 
+        {
+            static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/) 
+            {
+                auto fNtAllocate = reinterpret_cast<NtAllocateVirtualMemory_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtAllocateVirtualMemory"));
+                auto fNtProtect = reinterpret_cast<NtProtectVirtualMemory_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtProtectVirtualMemory"));
+                if (!fNtAllocate || !fNtProtect) 
+                    return false;
+
+                pOutRegion = nullptr;
+                SIZE_T uSize = uRegionSize;
+                NTSTATUS status = fNtAllocate(NtCurrentProcess(), &pOutRegion, 0, &uSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+
+                if (!NT_SUCCESS(status) || !pOutRegion)
+                    return false;
+
+                memcpy(pOutRegion, vecBuffer.data(), uRegionSize);
+
+                ULONG oldProtection = 0;
+                uSize = uRegionSize;
+                status = fNtProtect(NtCurrentProcess(), &pOutRegion, &uSize, PAGE_EXECUTE_READ, &oldProtection);
+
+                if (!NT_SUCCESS(status)) 
+                {
+                    uSize = 0;
+                    fNtAllocate(NtCurrentProcess(), &pOutRegion, 0, &uSize, MEM_RELEASE, 0);
+                    pOutRegion = nullptr;
+                    return false;
+                }
+
+                return true;
+            }
+
+            static void release(void* pRegion, HANDLE /*heapHandle*/) 
+            {
+                if (pRegion) 
+                {
+                    auto fNtFree = reinterpret_cast<NtFreeVirtualMemory_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtFreeVirtualMemory"));
+                    if (fNtFree)
+                    {
+                        SIZE_T uSize = 0; 
+                        fNtFree(NtCurrentProcess(), &pRegion, &uSize, MEM_RELEASE);
+                    }
+                }
+            }
+        };
+
         struct GadgetStubGenerator 
         {
             static constexpr bool bRequiresGadget = true;
@@ -219,7 +266,7 @@ namespace syscall
         }
 
         template<typename Ret, typename... Args>
-        __forceinline Ret invoke(const std::string& sSyscallName, Args... args) 
+        SYSCALL_FORCE_INLINE Ret invoke(const std::string& sSyscallName, Args... args) 
         {
             if (!m_bInitialized) 
             {

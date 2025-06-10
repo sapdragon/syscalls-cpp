@@ -1,6 +1,17 @@
 #ifndef _SHARED_HPP_
 #define _SHARED_HPP_
 
+      
+#if defined(_MSC_VER)
+    #define SYSCALL_FORCE_INLINE __forceinline
+#elif defined(__GNUC__) || defined(__clang__)
+    #define SYSCALL_FORCE_INLINE inline __attribute__((always_inline))
+#else
+    #define SYSCALL_FORCE_INLINE inline
+#endif
+
+    
+
 #include <Windows.h>
 #include <winternl.h>
 
@@ -57,5 +68,30 @@ using NtUnmapViewOfSection_t = NTSTATUS(NTAPI*)(
     HANDLE ProcessHandle,
     PVOID BaseAddress
     );
+
+typedef NTSTATUS(NTAPI* NtAllocateVirtualMemory_t)(
+    IN HANDLE ProcessHandle,
+    IN OUT PVOID* BaseAddress,
+    IN ULONG_PTR ZeroBits,
+    IN OUT PSIZE_T RegionSize,
+    IN ULONG AllocationType,
+    IN ULONG Protect
+    );
+
+typedef NTSTATUS(NTAPI* NtProtectVirtualMemory_t)(
+    IN HANDLE ProcessHandle,
+    IN OUT PVOID* BaseAddress,
+    IN OUT PSIZE_T RegionSize,
+    IN ULONG NewProtect,
+    OUT PULONG OldProtect
+    );
+
+typedef NTSTATUS(NTAPI* NtFreeVirtualMemory_t)(
+    IN HANDLE ProcessHandle,
+    IN OUT PVOID* BaseAddress,
+    IN OUT PSIZE_T RegionSize,
+    IN ULONG FreeType
+    );
+
 
 #endif

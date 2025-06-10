@@ -147,12 +147,27 @@ namespace syscall
         {
             static constexpr bool bRequiresGadget = true;
             static constexpr size_t getStubSize() { return 32; }
-            static void generate(uint8_t* pBuffer, uint32_t uSyscallNumber, void* pGadgetAddress) 
+            static void generate(uint8_t* pBuffer, uint32_t uSyscallNumber, void* pGadgetAddress)
             {
-                pBuffer[0] = 0x49; pBuffer[1] = 0x89; pBuffer[2] = 0xCA;
-                pBuffer[3] = 0xB8; *reinterpret_cast<uint32_t*>(&pBuffer[4]) = uSyscallNumber;
-                pBuffer[8] = 0x49; pBuffer[9] = 0xBB; *reinterpret_cast<uint64_t*>(&pBuffer[10]) = reinterpret_cast<uint64_t>(pGadgetAddress);
-                pBuffer[18] = 0x41; pBuffer[19] = 0x53;
+                // @note / SapDragon: mov r10, rcx
+                pBuffer[0] = 0x49;
+                pBuffer[1] = 0x89;
+                pBuffer[2] = 0xCA;
+
+                // @note / SapDragon: mov eax, syscallNumber
+                pBuffer[3] = 0xB8;
+                *reinterpret_cast<uint32_t*>(&pBuffer[4]) = uSyscallNumber;
+
+                // @note / SapDragon: mov r11, gadgetAddress
+                pBuffer[8] = 0x49;
+                pBuffer[9] = 0xBB;
+                *reinterpret_cast<uint64_t*>(&pBuffer[10]) = reinterpret_cast<uint64_t>(pGadgetAddress);
+
+                // @note / SapDragon: push r11
+                pBuffer[18] = 0x41;
+                pBuffer[19] = 0x53;
+
+                // @note / SapDragon: ret
                 pBuffer[20] = 0xC3;
             }
         };
@@ -160,7 +175,14 @@ namespace syscall
         struct DirectStubGenerator
         {
             static constexpr bool bRequiresGadget = false;
-            inline static const uint8_t arrShellcode[] = { 0x51, 0x41, 0x5A, 0xB8, 0x00, 0x00, 0x00, 0x00, 0x0F, 0x05, 0x48, 0x83, 0xC4, 0x08, 0xFF, 0x64, 0x24, 0xF8 };
+            inline static const uint8_t arrShellcode[] = {
+               0x51,                               // push rcx
+               0x41, 0x5A,                         // pop r10
+               0xB8, 0x00, 0x00, 0x00, 0x00,       // mov eax, 0x00000000 (syscall placeholder)
+               0x0F, 0x05,                         // syscall
+               0x48, 0x83, 0xC4, 0x08,             // add rsp, 8
+               0xFF, 0x64, 0x24, 0xF8              // jmp qword ptr [rsp-8]
+            };
             static constexpr size_t getStubSize() { return sizeof(arrShellcode); }
             static void generate(uint8_t* pBuffer, uint32_t uSyscallNumber, void* /*pGadgetAddress*/) 
             {
@@ -266,7 +288,7 @@ namespace syscall
         }
 
         template<typename Ret, typename... Args>
-        SYSCALL_FORCE_INLINE Ret invoke(const std::string& sSyscallName, Args... args) 
+        __forceinline Ret invoke(const std::string& sSyscallName, Args... args) 
         {
             if (!m_bInitialized) 
             {

@@ -110,7 +110,8 @@ namespace syscall
             }
         };
 
-        struct DirectStubGenerator {
+        struct DirectStubGenerator
+        {
             static constexpr bool bRequiresGadget = false;
             inline static const uint8_t arrShellcode[] = { 0x51, 0x41, 0x5A, 0xB8, 0x00, 0x00, 0x00, 0x00, 0x0F, 0x05, 0x48, 0x83, 0xC4, 0x08, 0xFF, 0x64, 0x24, 0xF8 };
             static constexpr size_t getStubSize() { return sizeof(arrShellcode); }
@@ -123,26 +124,30 @@ namespace syscall
     }
 
     template<typename T>
-    concept IsIAllocationPolicy = requires(size_t uSize, const std::vector<uint8_t>& vecBuffer, void*& pRegion, HANDLE & hObject) {
+    concept IsIAllocationPolicy = requires(size_t uSize, const std::vector<uint8_t>& vecBuffer, void*& pRegion, HANDLE & hObject) 
+    {
         { T::allocate(uSize, vecBuffer, pRegion, hObject) } -> std::convertible_to<bool>;
         { T::release(pRegion, hObject) } -> std::same_as<void>;
     };
 
     template<typename T>
-    concept IsStubGenerationPolicy = requires(uint8_t * pBuffer, uint32_t uSyscallNumber, void* pGadget) {
+    concept IsStubGenerationPolicy = requires(uint8_t * pBuffer, uint32_t uSyscallNumber, void* pGadget) 
+    {
         { T::bRequiresGadget } -> std::same_as<const bool&>;
         { T::getStubSize() } -> std::convertible_to<size_t>;
         { T::generate(pBuffer, uSyscallNumber, pGadget) } -> std::same_as<void>;
     };
 
-    struct SyscallEntry_t {
+    struct SyscallEntry_t 
+    {
         std::string m_sName;
         uint32_t m_uSyscallNumber;
         uint32_t m_uOffset;
     };
 
     template<IsIAllocationPolicy IAllocationPolicy, IsStubGenerationPolicy IStubGenerationPolicy>
-    class Manager {
+    class Manager 
+    {
     private:
         std::mutex m_mutex;
         std::unordered_map<std::string, SyscallEntry_t> m_mapParsedSyscalls;
@@ -214,7 +219,8 @@ namespace syscall
         }
 
         template<typename Ret, typename... Args>
-        __forceinline Ret invoke(const std::string& sSyscallName, Args... args) {
+        __forceinline Ret invoke(const std::string& sSyscallName, Args... args) 
+        {
             if (!m_bInitialized) 
             {
                 if (!initialize()) 

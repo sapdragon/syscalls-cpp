@@ -288,7 +288,7 @@ namespace syscall
         }
 
         template<typename Ret, typename... Args>
-        __forceinline Ret invoke(const std::string& sSyscallName, Args... args) 
+        SYSCALL_FORCE_INLINE  Ret invoke(const std::string& sSyscallName, Args... args) 
         {
             if (!m_bInitialized) 
             {

@@ -11,6 +11,7 @@
 #include <cstring>
 #include <utility>
 #include <concepts> 
+#include <array>
 
 #include "shared.hpp"
 
@@ -172,21 +173,25 @@ namespace syscall
             }
         };
 
-        struct DirectStubGenerator
+        struct DirectStubGenerator 
         {
             static constexpr bool bRequiresGadget = false;
-            inline static const uint8_t arrShellcode[] = {
-               0x51,                               // push rcx
-               0x41, 0x5A,                         // pop r10
-               0xB8, 0x00, 0x00, 0x00, 0x00,       // mov eax, 0x00000000 (syscall placeholder)
-               0x0F, 0x05,                         // syscall
-               0x48, 0x83, 0xC4, 0x08,             // add rsp, 8
-               0xFF, 0x64, 0x24, 0xF8              // jmp qword ptr [rsp-8]
-            };
-            static constexpr size_t getStubSize() { return sizeof(arrShellcode); }
-            static void generate(uint8_t* pBuffer, uint32_t uSyscallNumber, void* /*pGadgetAddress*/) 
+
+            inline static constexpr std::array<uint8_t, 18> arrShellcode = 
             {
-                memcpy(pBuffer, arrShellcode, sizeof(arrShellcode));
+                0x51,                               // push rcx
+                0x41, 0x5A,                         // pop r10
+                0xB8, 0x00, 0x00, 0x00, 0x00,       // mov eax, 0x00000000 (syscall number placeholder)
+                0x0F, 0x05,                         // syscall
+                0x48, 0x83, 0xC4, 0x08,             // add rsp, 8
+                0xFF, 0x64, 0x24, 0xF8              // jmp qword ptr [rsp-8]
+            };
+
+            static constexpr size_t getStubSize() { return arrShellcode.size(); }
+
+            static void generate(uint8_t* pBuffer, uint32_t uSyscallNumber, void* /*pGadgetAddress*/)
+            {
+                memcpy(pBuffer, arrShellcode.data(), arrShellcode.size());
                 *reinterpret_cast<uint32_t*>(pBuffer + 4) = uSyscallNumber;
             }
         };
@@ -288,7 +293,7 @@ namespace syscall
         }
 
         template<typename Ret, typename... Args>
-        SYSCALL_FORCE_INLINE  Ret invoke(const std::string& sSyscallName, Args... args) 
+        SYSCALL_FORCE_INLINE Ret invoke(const std::string& sSyscallName, Args... args)
         {
             if (!m_bInitialized) 
             {

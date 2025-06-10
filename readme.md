@@ -4,6 +4,8 @@ syscalls-cpp is just another syscall library. It leverages a policy-based design
 
 The core principle is **modularity**. You are not given a black box; you are given building blocks.
 
+**The library automatically resolves system call numbers by directly parsing `ntdll.dll` and is resilient to user-mode hooks by searching for adjacent syscalls if a target is patched.**
+
 ## The Building Blocks: Provided Policies
 
 You can combine any allocation policy with any stub generation policy.

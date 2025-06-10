@@ -1,16 +1,16 @@
 #ifndef _SHARED_HPP_
 #define _SHARED_HPP_
 
-      
+
 #if defined(_MSC_VER)
-    #define SYSCALL_FORCE_INLINE __forceinline
+#define SYSCALL_FORCE_INLINE __forceinline
 #elif defined(__GNUC__) || defined(__clang__)
-    #define SYSCALL_FORCE_INLINE inline __attribute__((always_inline))
+#define SYSCALL_FORCE_INLINE inline __attribute__((always_inline))
 #else
-    #define SYSCALL_FORCE_INLINE inline
+#define SYSCALL_FORCE_INLINE inline
 #endif
 
-    
+
 
 #include <Windows.h>
 #include <winternl.h>
@@ -93,5 +93,41 @@ typedef NTSTATUS(NTAPI* NtFreeVirtualMemory_t)(
     IN ULONG FreeType
     );
 
+struct SHARED_LDR_DATA_TABLE_ENTRY
+{
+    struct _LIST_ENTRY InLoadOrderLinks;                                    //0x0
+    struct _LIST_ENTRY InMemoryOrderLinks;                                  //0x10
+    struct _LIST_ENTRY InInitializationOrderLinks;                          //0x20
+    VOID* DllBase;                                                          //0x30
+    VOID* EntryPoint;                                                       //0x38
+    ULONG SizeOfImage;                                                      //0x40
+    struct _UNICODE_STRING FullDllName;                                     //0x48
+    struct _UNICODE_STRING BaseDllName;                                     //0x58
+    ULONG Flags;                                                            //0x68
+    USHORT LoadCount;                                                       //0x6c
+    USHORT TlsIndex;                                                        //0x6e
+    union
+    {
+        struct _LIST_ENTRY HashLinks;                                       //0x70
+        struct
+        {
+            VOID* SectionPointer;                                           //0x70
+            ULONG CheckSum;                                                 //0x78
+        };
+    };
+    union
+    {
+        ULONG TimeDateStamp;                                                //0x80
+        VOID* LoadedImports;                                                //0x80
+    };
+    struct _ACTIVATION_CONTEXT* EntryPointActivationContext;                //0x88
+    VOID* PatchInformation;                                                 //0x90
+    struct _LIST_ENTRY ForwarderLinks;                                      //0x98
+    struct _LIST_ENTRY ServiceTagLinks;                                     //0xa8
+    struct _LIST_ENTRY StaticLinks;                                         //0xb8
+    VOID* ContextInformation;                                               //0xc8
+    ULONGLONG OriginalBase;                                                 //0xd0
+    union _LARGE_INTEGER LoadTime;                                          //0xd8
+};
 
 #endif

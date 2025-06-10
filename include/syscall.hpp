@@ -277,7 +277,7 @@ namespace syscall
                 return true;
 
             std::lock_guard<std::mutex> lock(m_mutex);
-
+            
             if (m_bInitialized) 
                 return true;
 
@@ -340,74 +340,113 @@ namespace syscall
             return IAllocationPolicy::allocate(m_uRegionSize, vecTempBuffer, m_pSyscallRegion, m_hObjectHandle);
         }
 
-        bool findSyscallGadget() 
+        struct NtdllInfo_t 
         {
-            HMODULE hNtHandle = GetModuleHandleA("ntdll.dll");
-            if (!hNtHandle) 
+            uint8_t* m_pNtdllBase = nullptr;
+            IMAGE_NT_HEADERS* m_pNtHeaders = nullptr;
+            IMAGE_EXPORT_DIRECTORY* m_pExportDir = nullptr;
+        };
+
+        static bool getNtdll(NtdllInfo_t& info)
+        {
+            auto pPeb = reinterpret_cast<PPEB>(__readgsqword(0x60));
+
+            if (!pPeb || !pPeb->Ldr)
                 return false;
 
-            auto pDosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(hNtHandle);
-            auto pNtHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(reinterpret_cast<uint8_t*>(hNtHandle) + pDosHeader->e_lfanew);
-            IMAGE_SECTION_HEADER* sections = IMAGE_FIRST_SECTION(pNtHeaders);
-            uint8_t* pTextSection = nullptr;
-            uint32_t uTextSectionSize = 0;
-            for (int i = 0; i < pNtHeaders->FileHeader.NumberOfSections; ++i)
-            {
-                if (strcmp(reinterpret_cast<char*>(sections[i].Name), ".text") == 0)
-                {
-                    pTextSection = reinterpret_cast<uint8_t*>(hNtHandle) + sections[i].VirtualAddress;
-                    uTextSectionSize = sections[i].Misc.VirtualSize;
-                    break;
-                }
-            }
+            auto pLdrData = pPeb->Ldr;
+            auto pModuleList = &pLdrData->InMemoryOrderModuleList;
+            auto pListEntry = pModuleList->Flink;
 
-            if (!pTextSection || !uTextSectionSize)
-                return false;
-
-            for (DWORD iCurrentByte = 0; iCurrentByte < uTextSectionSize - 2; ++iCurrentByte)
+            for (; pListEntry != pModuleList; pListEntry = pListEntry->Flink)
             {
-                if (pTextSection[iCurrentByte] == 0x0F && pTextSection[iCurrentByte + 1] == 0x05 && pTextSection[iCurrentByte + 2] == 0xC3)
+                auto pEntry = reinterpret_cast <SHARED_LDR_DATA_TABLE_ENTRY*>( CONTAINING_RECORD(pListEntry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks));
+
+                const wchar_t* wcName = pEntry->BaseDllName.Buffer;
+                if (pEntry->BaseDllName.Length == 18 && wcName &&
+                    (wcName[0] | 0x20) == L'n' && (wcName[1] | 0x20) == L't' &&
+                    (wcName[2] | 0x20) == L'd' && (wcName[3] | 0x20) == L'l' &&
+                    (wcName[4] | 0x20) == L'l' && wcName[5] == L'.' &&
+                    (wcName[6] | 0x20) == L'd' && (wcName[7] | 0x20) == L'l' &&
+                    (wcName[8] | 0x20) == L'l')
                 {
-                    m_pSyscallGadget = &pTextSection[iCurrentByte];
+                    info.m_pNtdllBase = reinterpret_cast<uint8_t*>(pEntry->DllBase);
+                    auto pDosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(info.m_pNtdllBase);
+                    info.m_pNtHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(info.m_pNtdllBase + pDosHeader->e_lfanew);
+                    auto exportRva = info.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+                    info.m_pExportDir = reinterpret_cast<IMAGE_EXPORT_DIRECTORY*>(info.m_pNtdllBase + exportRva);
                     return true;
                 }
             }
-
             return false;
         }
 
-
-        bool extractSyscalls() 
+        bool extractSyscalls()
         {
-            HMODULE hNtdllHandle = GetModuleHandleA("ntdll.dll");
-            if (!hNtdllHandle) 
+            NtdllInfo_t ntdll;
+            if (!getNtdll(ntdll)) 
                 return false;
 
-            auto pNtdllBase = reinterpret_cast<uint8_t*>(hNtdllHandle);
-            auto pDosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(pNtdllBase);
-            auto pNtHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(pNtdllBase + pDosHeader->e_lfanew);
-            auto pExportDirRVA = pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-            auto pExportDir = reinterpret_cast<IMAGE_EXPORT_DIRECTORY*>(pNtdllBase + pExportDirRVA);
-            auto pFunctionsRVA = reinterpret_cast<uint32_t*>(pNtdllBase + pExportDir->AddressOfFunctions);
-            auto pNamesRVA = reinterpret_cast<uint32_t*>(pNtdllBase + pExportDir->AddressOfNames);
-            auto pOrdinalsRva = reinterpret_cast<uint16_t*>(pNtdllBase + pExportDir->AddressOfNameOrdinals);
-            for (uint32_t i = 0; i < pExportDir->NumberOfNames; i++) 
+            auto pFunctionsRVA = reinterpret_cast<uint32_t*>(ntdll.m_pNtdllBase + ntdll.m_pExportDir->AddressOfFunctions);
+            auto pNamesRVA = reinterpret_cast<uint32_t*>(ntdll.m_pNtdllBase + ntdll.m_pExportDir->AddressOfNames);
+            auto pOrdinalsRva = reinterpret_cast<uint16_t*>(ntdll.m_pNtdllBase + ntdll.m_pExportDir->AddressOfNameOrdinals);
+
+            for (uint32_t i = 0; i < ntdll.m_pExportDir->NumberOfNames; i++)
             {
-                const char* szName = reinterpret_cast<const char*>(pNtdllBase + pNamesRVA[i]);
+                const char* szName = reinterpret_cast<const char*>(ntdll.m_pNtdllBase + pNamesRVA[i]);
+
                 if (strncmp(szName, "Nt", 2) != 0)
                     continue;
-                    
+
                 uint16_t uOrdinal = pOrdinalsRva[i];
                 uint32_t uFunctionRva = pFunctionsRVA[uOrdinal];
-                if (uFunctionRva >= pExportDirRVA && uFunctionRva < pExportDirRVA + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size)
+                auto pExportSectionStart = ntdll.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+                auto pExportSectionEnd = pExportSectionStart + ntdll.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
+                if (uFunctionRva >= pExportSectionStart && uFunctionRva < pExportSectionEnd)
                     continue;
 
-                uint8_t* pFunctionStart = pNtdllBase + uFunctionRva;
-                if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C) 
+                uint8_t* pFunctionStart = ntdll.m_pNtdllBase + uFunctionRva;
+                uint32_t uSyscallNumber = 0;
+
+                bool bIsHooked = false;
+                if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C)
+                    uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 4);
+                else if (*pFunctionStart == 0xE9)
+                    bIsHooked = true;
+
+                if (bIsHooked)
+                {
+                    // @note / SapDragon: search up
+                    for (int j = 1; j < 20; ++j)
+                    {
+                        uint8_t* pNeighborFunc = pFunctionStart + (j * 0x20);
+                        if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C) 
+                        {
+                            uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
+                            uSyscallNumber = uNeighborSyscall - j;
+                            break;
+                        }
+                    }
+
+                    // @note / SapDragon: search down
+                    if (uSyscallNumber == 0) 
+                    {
+                        for (int j = 1; j < 20; ++j) 
+                        {
+                            uint8_t* pNeighborFunc = pFunctionStart - (j * 0x20);
+                            if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C) 
+                            {
+                                uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
+                                uSyscallNumber = uNeighborSyscall + j;
+                                break;
+                            }
+                        }
+                    }
+                }
+
+                if (uSyscallNumber)
                 {
                     std::string sName = szName;
-                    uint32_t uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 4);
-
                     m_mapParsedSyscalls[sName] = SyscallEntry_t
                     {
                          sName,
@@ -416,7 +455,41 @@ namespace syscall
                     };
                 }
             }
-            return !m_mapParsedSyscalls.empty();   
+            return !m_mapParsedSyscalls.empty();
+        }
+
+        bool findSyscallGadget()
+        {
+            NtdllInfo_t ntdll;
+            if (!getNtdll(ntdll))
+                return false;
+
+            IMAGE_SECTION_HEADER* sections = IMAGE_FIRST_SECTION(ntdll.m_pNtHeaders);
+            uint8_t* pTextSection = nullptr;
+            uint32_t uTextSectionSize = 0;
+            for (int i = 0; i < ntdll.m_pNtHeaders->FileHeader.NumberOfSections; ++i)
+            {
+                if (strcmp(reinterpret_cast<char*>(sections[i].Name), ".text") == 0)
+                {
+                    pTextSection = ntdll.m_pNtdllBase + sections[i].VirtualAddress;
+                    uTextSectionSize = sections[i].Misc.VirtualSize;
+                    break;
+                }
+            }
+
+            if (!pTextSection || !uTextSectionSize)
+                return false;
+
+            for (DWORD i = 0; i < uTextSectionSize - 2; ++i)
+            {
+                if (pTextSection[i] == 0x0F && pTextSection[i + 1] == 0x05 && pTextSection[i + 2] == 0xC3)
+                {
+                    m_pSyscallGadget = &pTextSection[i];
+                    return true;
+                }
+            }
+
+            return false;
         }
     };
 }

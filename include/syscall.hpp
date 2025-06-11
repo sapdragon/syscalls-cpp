@@ -530,7 +530,7 @@ namespace syscall
 
         bool findSyscallGadget()
         {
-            NtdllInfo ntdll;
+            NtdllInfo_t ntdll;
             if (!getNtdll(ntdll))
                 return false;
 

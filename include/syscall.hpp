@@ -53,8 +53,14 @@ namespace syscall
                 CloseHandle(hSectionHandle);
                 return NT_SUCCESS(status) && pOutRegion;
             }
-            static void release(void* /*pRegion*/, HANDLE /*hHeapHandle*/) 
+            static void release(void* pRegion, HANDLE /*hHeapHandle*/) 
             {
+                if (pRegion) 
+                {
+                    auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtUnmapViewOfSection"));
+                    if (fNtUnmapView) 
+                        fNtUnmapView(NtCurrentProcess(), pRegion);
+                }
             }
         };
 

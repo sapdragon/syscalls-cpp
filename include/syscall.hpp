@@ -291,7 +291,7 @@ namespace syscall
                 if (!findSyscallGadget())
                     return false;
 
-            //if (!extractSyscallsFromExceptionDir())
+            if (!extractSyscallsFromExceptionDir())
             {
                 // @note / SapDragon: fallback if the primary one fails
                 m_mapParsedSyscalls.clear();

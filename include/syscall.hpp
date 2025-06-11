@@ -291,7 +291,7 @@ namespace syscall
                 if (!findSyscallGadget())
                     return false;
 
-            if (!extractSyscallsFromExceptionDir())
+            //if (!extractSyscallsFromExceptionDir())
             {
                 // @note / SapDragon: fallback if the primary one fails
                 m_mapParsedSyscalls.clear();
@@ -480,8 +480,7 @@ namespace syscall
                 // @note / SapDragon: mov r10, rcx; mov eax, syscallNumber
                 if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C) 
                     uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 4);
-                // @note / SapDragon: jmp
-                else if (*pFunctionStart == 0xE9)
+                else if (isFunctionHooked(pFunctionStart))
                     bIsHooked = true;
 
                 if (bIsHooked)
@@ -499,7 +498,7 @@ namespace syscall
                     }
 
                     // @note / SapDragon: search down
-                    if (uSyscallNumber == 0)
+                    if (!uSyscallNumber)
                     {
                         for (int j = 1; j < 20; ++j)
                         {
@@ -557,6 +556,40 @@ namespace syscall
                     m_pSyscallGadget = &pTextSection[i];
                     return true;
                 }
+            }
+
+            return false;
+        }
+
+        bool isFunctionHooked(const uint8_t* pFunctionStart) const
+        {
+            const uint8_t* pCurrent = pFunctionStart;
+
+            while (*pCurrent == 0x90) {
+                pCurrent++;
+            }
+
+            switch (pCurrent[0])
+            {
+                // @note / SapDragon: JMP rel32
+            case 0xE9:
+                // @note / SapDragon: JMP rel8
+            case 0xEB:
+                // @note / SapDragon: push imm32
+            case 0x68:
+                return true;
+                // @note / SapDragon: jmp [mem] / jmp [rip + offset]
+            case 0xFF:
+                if (pCurrent[1] == 0x25)
+                    return true;
+                break;
+
+                // @note / SapDragon: int3...
+            case 0xCC:
+                return true;
+
+            default:
+                break;
             }
 
             return false;

@@ -93,6 +93,10 @@ typedef NTSTATUS(NTAPI* NtFreeVirtualMemory_t)(
     IN ULONG FreeType
     );
 
+using RtlCreateHeap_t = PVOID(NTAPI*)(ULONG, PVOID, SIZE_T, SIZE_T, PVOID, PVOID);
+using RtlAllocateHeap_t = PVOID(NTAPI*)(PVOID, ULONG, SIZE_T);
+using RtlDestroyHeap_t = PVOID(NTAPI*)(PVOID);
+
 struct SHARED_LDR_DATA_TABLE_ENTRY
 {
     struct _LIST_ENTRY InLoadOrderLinks;                                    //0x0

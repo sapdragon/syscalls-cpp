@@ -68,41 +68,47 @@ namespace syscall
             }
         };
 
-        struct HeapAllocator 
+        struct HeapAllocator
         {
-            static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& hOutHeapHandle) 
+            static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& hOutHeapHandle)
             {
-                using HeapCreate_t = HANDLE(WINAPI*)(DWORD, SIZE_T, SIZE_T);
-                using HeapAlloc_t = LPVOID(WINAPI*)(HANDLE, DWORD, SIZE_T);
-                auto fHeapCreate = reinterpret_cast<HeapCreate_t>(GetProcAddress(GetModuleHandleA("kernel32.dll"), "HeapCreate"));
-                auto fHeapAlloc = reinterpret_cast<HeapAlloc_t>(GetProcAddress(GetModuleHandleA("kernel32.dll"), "HeapAlloc"));
-
-                if (!fHeapCreate || !fHeapAlloc) 
+                HMODULE hNtdll = native::getModuleBase(L"ntdll.dll");
+                if (!hNtdll)
                     return false;
 
-                hOutHeapHandle = fHeapCreate(HEAP_CREATE_ENABLE_EXECUTE, 0, 0);
-                if (!hOutHeapHandle) 
+                auto fRtlCreateHeap = reinterpret_cast<RtlCreateHeap_t>(native::getExportAddress(hNtdll, "RtlCreateHeap"));
+                auto fRtlAllocateHeap = reinterpret_cast<RtlAllocateHeap_t>(native::getExportAddress(hNtdll, "RtlAllocateHeap"));
+
+                if (!fRtlCreateHeap || !fRtlAllocateHeap)
                     return false;
 
-                pOutRegion = fHeapAlloc(hOutHeapHandle, 0, uRegionSize);
-                if (!pOutRegion) 
+                hOutHeapHandle = fRtlCreateHeap(HEAP_CREATE_ENABLE_EXECUTE, nullptr, 0, 0, nullptr, nullptr);
+                if (!hOutHeapHandle)
+                    return false;
+
+                pOutRegion = fRtlAllocateHeap(hOutHeapHandle, 0, uRegionSize);
+                if (!pOutRegion)
                 {
                     release(nullptr, hOutHeapHandle);
                     hOutHeapHandle = nullptr;
-                    return false; 
+                    return false;
                 }
 
                 memcpy(pOutRegion, vecBuffer.data(), uRegionSize);
                 return true;
             }
-            static void release(void* /*region*/, HANDLE hHeapHandle) 
+
+            static void release(void* /*region*/, HANDLE hHeapHandle)
             {
-                if (hHeapHandle) 
+                if (hHeapHandle)
                 {
-                    using HeapDestroy_t = BOOL(WINAPI*)(HANDLE);
-                    auto fHeapDestroy = reinterpret_cast<HeapDestroy_t>(GetProcAddress(GetModuleHandleA("kernel32.dll"), "HeapDestroy"));
-                    if (fHeapDestroy)
-                        fHeapDestroy(hHeapHandle);
+                    HMODULE hNtdll = native::getModuleBase(L"ntdll.dll");
+                    if (!hNtdll)
+                        return;
+
+                    auto fRtlDestroyHeap = reinterpret_cast<RtlDestroyHeap_t>(native::getExportAddress(hNtdll, "RtlDestroyHeap"));
+                    if (fRtlDestroyHeap)
+                        fRtlDestroyHeap(hHeapHandle);
                 }
             }
         };

@@ -279,20 +279,25 @@ namespace syscall
 
         bool initialize() 
         {
-            if (m_bInitialized) 
+            if (m_bInitialized)
                 return true;
 
             std::lock_guard<std::mutex> lock(m_mutex);
-            
-            if (m_bInitialized) 
+
+            if (m_bInitialized)
                 return true;
 
             if constexpr (IStubGenerationPolicy::bRequiresGadget)
-                if (!findSyscallGadget()) 
+                if (!findSyscallGadget())
                     return false;
 
-            if (!extractSyscalls()) 
-                return false;
+            if (!extractSyscallsFromExceptionDir())
+            {
+                // @note / SapDragon: fallback if the primary one fails
+                m_mapParsedSyscalls.clear();
+                if (!extractSyscallsByScanning())
+                    return false; 
+            }
 
             m_bInitialized = createSyscalls();
             return m_bInitialized;
@@ -379,18 +384,75 @@ namespace syscall
                     info.m_pNtdllBase = reinterpret_cast<uint8_t*>(pEntry->DllBase);
                     auto pDosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(info.m_pNtdllBase);
                     info.m_pNtHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(info.m_pNtdllBase + pDosHeader->e_lfanew);
-                    auto exportRva = info.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-                    info.m_pExportDir = reinterpret_cast<IMAGE_EXPORT_DIRECTORY*>(info.m_pNtdllBase + exportRva);
+                    auto uExportRva = info.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+                    info.m_pExportDir = reinterpret_cast<IMAGE_EXPORT_DIRECTORY*>(info.m_pNtdllBase + uExportRva);
                     return true;
                 }
             }
             return false;
         }
 
-        bool extractSyscalls()
+        bool extractSyscallsFromExceptionDir()
         {
             NtdllInfo_t ntdll;
-            if (!getNtdll(ntdll)) 
+            if (!getNtdll(ntdll))
+                return false;
+
+            auto uExceptionDirRva = ntdll.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress;
+            if (!uExceptionDirRva)
+                return false;
+
+            auto pRuntimeFunctions = reinterpret_cast<PIMAGE_RUNTIME_FUNCTION_ENTRY>(ntdll.m_pNtdllBase + uExceptionDirRva);
+            auto uExceptionDirSize = ntdll.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size;
+            auto uFunctionCount = uExceptionDirSize / sizeof(IMAGE_RUNTIME_FUNCTION_ENTRY);
+
+            auto pFunctionsRVA = reinterpret_cast<uint32_t*>(ntdll.m_pNtdllBase + ntdll.m_pExportDir->AddressOfFunctions);
+            auto pNamesRVA = reinterpret_cast<uint32_t*>(ntdll.m_pNtdllBase + ntdll.m_pExportDir->AddressOfNames);
+            auto pOrdinalsRva = reinterpret_cast<uint16_t*>(ntdll.m_pNtdllBase + ntdll.m_pExportDir->AddressOfNameOrdinals);
+
+            std::unordered_map<uint32_t, const char*> mapRvaToName;
+            for (uint32_t iCurrentNameIndex = 0; iCurrentNameIndex < ntdll.m_pExportDir->NumberOfNames; ++iCurrentNameIndex)
+            {
+                const char* szName = reinterpret_cast<const char*>(ntdll.m_pNtdllBase + pNamesRVA[iCurrentNameIndex]);
+                uint16_t uOrdinal = pOrdinalsRva[iCurrentNameIndex];
+                uint32_t uFunctionRva = pFunctionsRVA[uOrdinal];
+                mapRvaToName[uFunctionRva] = szName;
+            }
+
+            uint32_t uSyscallNumber = 0;
+            for (DWORD iCurrentFunctionIndex = 0; iCurrentFunctionIndex < uFunctionCount; ++iCurrentFunctionIndex)
+            {
+                auto pFunction = &pRuntimeFunctions[iCurrentFunctionIndex];
+                if (pFunction->BeginAddress == 0)
+                    break;
+
+                auto it = mapRvaToName.find(pFunction->BeginAddress);
+                if (it != mapRvaToName.end())
+                {
+                    const char* szName = it->second;
+                    if (szName[0] == 'Z' && szName[1] == 'w')
+                    {
+                        std::string sName = szName;
+                        sName[0] = 'N';
+                        sName[1] = 't';
+
+                        m_mapParsedSyscalls[sName] = SyscallEntry_t{
+                             sName,
+                             uSyscallNumber,
+                             static_cast<uint32_t>(m_mapParsedSyscalls.size() * IStubGenerationPolicy::getStubSize())
+                        };
+                        uSyscallNumber++;
+                    }
+                }
+            }
+
+            return !m_mapParsedSyscalls.empty();
+        }
+
+        bool extractSyscallsByScanning()
+        {
+            NtdllInfo_t ntdll;
+            if (!getNtdll(ntdll))
                 return false;
 
             auto pFunctionsRVA = reinterpret_cast<uint32_t*>(ntdll.m_pNtdllBase + ntdll.m_pExportDir->AddressOfFunctions);
@@ -415,8 +477,10 @@ namespace syscall
                 uint32_t uSyscallNumber = 0;
 
                 bool bIsHooked = false;
-                if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C)
+                // @note / SapDragon: mov r10, rcx; mov eax, syscallNumber
+                if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C) 
                     uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 4);
+                // @note / SapDragon: jmp
                 else if (*pFunctionStart == 0xE9)
                     bIsHooked = true;
 
@@ -426,7 +490,7 @@ namespace syscall
                     for (int j = 1; j < 20; ++j)
                     {
                         uint8_t* pNeighborFunc = pFunctionStart + (j * 0x20);
-                        if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C) 
+                        if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C)
                         {
                             uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
                             uSyscallNumber = uNeighborSyscall - j;
@@ -435,12 +499,12 @@ namespace syscall
                     }
 
                     // @note / SapDragon: search down
-                    if (uSyscallNumber == 0) 
+                    if (uSyscallNumber == 0)
                     {
-                        for (int j = 1; j < 20; ++j) 
+                        for (int j = 1; j < 20; ++j)
                         {
                             uint8_t* pNeighborFunc = pFunctionStart - (j * 0x20);
-                            if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C) 
+                            if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C)
                             {
                                 uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
                                 uSyscallNumber = uNeighborSyscall + j;
@@ -466,7 +530,7 @@ namespace syscall
 
         bool findSyscallGadget()
         {
-            NtdllInfo_t ntdll;
+            NtdllInfo ntdll;
             if (!getNtdll(ntdll))
                 return false;
 

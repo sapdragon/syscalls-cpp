@@ -130,4 +130,10 @@ struct SHARED_LDR_DATA_TABLE_ENTRY
     union _LARGE_INTEGER LoadTime;                                          //0xd8
 };
 
+#if defined(_MSC_VER)
+#define STR_ICMP _wcsicmp
+#else
+#define STR_ICMP wcscasecmp
+#endif
+
 #endif

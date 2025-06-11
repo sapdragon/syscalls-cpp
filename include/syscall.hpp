@@ -14,6 +14,7 @@
 #include <array>
 
 #include "shared.hpp"
+#include "native_api.hpp"
 
 namespace syscall 
 {
@@ -23,9 +24,11 @@ namespace syscall
         {
             static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/) 
             {
-                auto fNtCreateSection = reinterpret_cast<NtCreateSection_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtCreateSection"));
-                auto fNtMapView = reinterpret_cast<NtMapViewOfSection_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtMapViewOfSection"));
-                auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtUnmapViewOfSection"));
+                HMODULE hNtDll = native::getModuleBase(L"ntdll.dll");
+
+                auto fNtCreateSection = reinterpret_cast<NtCreateSection_t>(native::getExportAddress(hNtDll, "NtCreateSection"));
+                auto fNtMapView = reinterpret_cast<NtMapViewOfSection_t>(native::getExportAddress(hNtDll, "NtMapViewOfSection"));
+                auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, "NtUnmapViewOfSection"));
                 if (!fNtCreateSection || !fNtMapView || !fNtUnmapView) 
                     return false;
 
@@ -55,9 +58,10 @@ namespace syscall
             }
             static void release(void* pRegion, HANDLE /*hHeapHandle*/) 
             {
+                HMODULE hNtDll = native::getModuleBase(L"ntdll.dll");
                 if (pRegion) 
                 {
-                    auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtUnmapViewOfSection"));
+                    auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, "NtUnmapViewOfSection"));
                     if (fNtUnmapView) 
                         fNtUnmapView(NtCurrentProcess(), pRegion);
                 }
@@ -107,8 +111,10 @@ namespace syscall
         {
             static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/) 
             {
-                auto fNtAllocate = reinterpret_cast<NtAllocateVirtualMemory_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtAllocateVirtualMemory"));
-                auto fNtProtect = reinterpret_cast<NtProtectVirtualMemory_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtProtectVirtualMemory"));
+                HMODULE hNtDll = native::getModuleBase(L"ntdll.dll");
+
+                auto fNtAllocate = reinterpret_cast<NtAllocateVirtualMemory_t>(native::getExportAddress(hNtDll, "NtAllocateVirtualMemory"));
+                auto fNtProtect = reinterpret_cast<NtProtectVirtualMemory_t>(native::getExportAddress(hNtDll, "NtProtectVirtualMemory"));
                 if (!fNtAllocate || !fNtProtect) 
                     return false;
 
@@ -138,9 +144,11 @@ namespace syscall
 
             static void release(void* pRegion, HANDLE /*heapHandle*/) 
             {
+                HMODULE hNtDll = native::getModuleBase(L"ntdll.dll");
+
                 if (pRegion) 
                 {
-                    auto fNtFree = reinterpret_cast<NtFreeVirtualMemory_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtFreeVirtualMemory"));
+                    auto fNtFree = reinterpret_cast<NtFreeVirtualMemory_t>(native::getExportAddress(hNtDll, "NtFreeVirtualMemory"));
                     if (fNtFree)
                     {
                         SIZE_T uSize = 0; 
@@ -360,36 +368,27 @@ namespace syscall
 
         static bool getNtdll(NtdllInfo_t& info)
         {
-            auto pPeb = reinterpret_cast<PPEB>(__readgsqword(0x60));
-
-            if (!pPeb || !pPeb->Ldr)
+            HMODULE hNtdll = native::getModuleBase(L"ntdll.dll");
+            if (!hNtdll)
                 return false;
 
-            auto pLdrData = pPeb->Ldr;
-            auto pModuleList = &pLdrData->InMemoryOrderModuleList;
-            auto pListEntry = pModuleList->Flink;
+            info.m_pNtdllBase = reinterpret_cast<uint8_t*>(hNtdll);
 
-            for (; pListEntry != pModuleList; pListEntry = pListEntry->Flink)
-            {
-                auto pEntry = reinterpret_cast <SHARED_LDR_DATA_TABLE_ENTRY*>( CONTAINING_RECORD(pListEntry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks));
+            auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(info.m_pNtdllBase);
+            if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+                return false;
 
-                const wchar_t* wcName = pEntry->BaseDllName.Buffer;
-                if (pEntry->BaseDllName.Length == 18 && wcName &&
-                    (wcName[0] | 0x20) == L'n' && (wcName[1] | 0x20) == L't' &&
-                    (wcName[2] | 0x20) == L'd' && (wcName[3] | 0x20) == L'l' &&
-                    (wcName[4] | 0x20) == L'l' && wcName[5] == L'.' &&
-                    (wcName[6] | 0x20) == L'd' && (wcName[7] | 0x20) == L'l' &&
-                    (wcName[8] | 0x20) == L'l')
-                {
-                    info.m_pNtdllBase = reinterpret_cast<uint8_t*>(pEntry->DllBase);
-                    auto pDosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(info.m_pNtdllBase);
-                    info.m_pNtHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(info.m_pNtdllBase + pDosHeader->e_lfanew);
-                    auto uExportRva = info.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-                    info.m_pExportDir = reinterpret_cast<IMAGE_EXPORT_DIRECTORY*>(info.m_pNtdllBase + uExportRva);
-                    return true;
-                }
-            }
-            return false;
+            info.m_pNtHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>(info.m_pNtdllBase + pDosHeader->e_lfanew);
+            if (info.m_pNtHeaders->Signature != IMAGE_NT_SIGNATURE)
+                return false;
+
+            auto uExportRva = info.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+            if (!uExportRva) 
+                return false;
+
+            info.m_pExportDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(info.m_pNtdllBase + uExportRva);
+
+            return true;
         }
 
         bool extractSyscallsFromExceptionDir()

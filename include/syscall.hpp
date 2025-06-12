@@ -31,7 +31,9 @@ namespace syscall
                 auto fNtCreateSection = reinterpret_cast<NtCreateSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtCreateSection")));
                 auto fNtMapView = reinterpret_cast<NtMapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtMapViewOfSection")));
                 auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtUnmapViewOfSection")));
-                if (!fNtCreateSection || !fNtMapView || !fNtUnmapView)
+                auto fNtCloseHandle = reinterpret_cast<NtCloseHandle_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtCloseHandle")));
+
+                if (!fNtCreateSection || !fNtMapView || !fNtUnmapView || !fNtCloseHandle)
                     return false;
 
                 HANDLE hSectionHandle = nullptr;
@@ -47,15 +49,15 @@ namespace syscall
                 status = fNtMapView(hSectionHandle, NtCurrentProcess(), &pTempView, 0, 0, nullptr, &uViewSize, ViewShare, 0, PAGE_READWRITE);
                 if (!NT_SUCCESS(status))
                 {
-                    CloseHandle(hSectionHandle);
+                    fNtCloseHandle(hSectionHandle);
                     return false;
                 }
 
-                memcpy(pTempView, vecBuffer.data(), uRegionSize);
+                crt::memory::copy(pTempView, vecBuffer.data(), uRegionSize);
                 fNtUnmapView(NtCurrentProcess(), pTempView);
                 uViewSize = uRegionSize;
                 status = fNtMapView(hSectionHandle, NtCurrentProcess(), &pOutRegion, 0, 0, nullptr, &uViewSize, ViewShare, 0, PAGE_EXECUTE_READ);
-                CloseHandle(hSectionHandle);
+                fNtCloseHandle(hSectionHandle);
                 return NT_SUCCESS(status) && pOutRegion;
             }
             static void release(void* pRegion, HANDLE /*hHeapHandle*/)
@@ -96,7 +98,7 @@ namespace syscall
                     return false;
                 }
 
-                memcpy(pOutRegion, vecBuffer.data(), uRegionSize);
+                crt::memory::copy(pOutRegion, vecBuffer.data(), uRegionSize);
                 return true;
             }
 
@@ -133,7 +135,7 @@ namespace syscall
                 if (!NT_SUCCESS(status) || !pOutRegion)
                     return false;
 
-                memcpy(pOutRegion, vecBuffer.data(), uRegionSize);
+                crt::memory::copy(pOutRegion, vecBuffer.data(), uRegionSize);
 
                 ULONG oldProtection = 0;
                 uSize = uRegionSize;
@@ -213,7 +215,7 @@ namespace syscall
 
             static void generate(uint8_t* pBuffer, uint32_t uSyscallNumber, void* /*pGadgetAddress*/)
             {
-                memcpy(pBuffer, arrShellcode.data(), arrShellcode.size());
+                crt::memory::copy(pBuffer, arrShellcode.data(), arrShellcode.size());
                 *reinterpret_cast<uint32_t*>(pBuffer + 4) = uSyscallNumber;
             }
         };
@@ -591,9 +593,8 @@ namespace syscall
         {
             const uint8_t* pCurrent = pFunctionStart;
 
-            while (*pCurrent == 0x90) {
+            while (*pCurrent == 0x90)
                 pCurrent++;
-            }
 
             switch (pCurrent[0])
             {

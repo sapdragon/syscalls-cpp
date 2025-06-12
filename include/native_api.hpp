@@ -3,10 +3,9 @@
 
 #include "shared.hpp"
 #include "hash.hpp"
+#include "crt.hpp"
 #include <cstdint>
 #include <cwchar>
-#include <string.h>
-#include <cctype>
 
 namespace native
 {
@@ -20,7 +19,7 @@ namespace native
 
         while ((wcCurrent = *wzData++))
         {
-            char cAnsiChar = static_cast<char>(std::tolower(wcCurrent));
+            char cAnsiChar = static_cast<char>(crt::string::toLower(wcCurrent));
             hash ^= static_cast<hashing::Hash_t>(cAnsiChar);
             hash += std::rotr(hash, 11) + hashing::polyKey2;
         }
@@ -39,20 +38,19 @@ namespace native
 
         while (pCurrentEntry != pListHead)
         {
-            auto pEntry = reinterpret_cast <SHARED_LDR_DATA_TABLE_ENTRY*>(CONTAINING_RECORD(pCurrentEntry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks));
-            if (pEntry->BaseDllName.Buffer && STR_ICMP(pEntry->BaseDllName.Buffer, wzModuleName) == 0)
+            auto pEntry = reinterpret_cast<SHARED_LDR_DATA_TABLE_ENTRY*>(CONTAINING_RECORD(pCurrentEntry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks));
+            if (pEntry->BaseDllName.Buffer && crt::string::compareIgnoreCase(pEntry->BaseDllName.Buffer, wzModuleName) == 0)
                 return reinterpret_cast<HMODULE>(pEntry->DllBase);
 
             pCurrentEntry = pCurrentEntry->Flink;
         }
-
         return nullptr;
     }
 
     inline HMODULE getModuleBase(hashing::Hash_t uModuleHash)
     {
         auto pPeb = reinterpret_cast<PPEB>(__readgsqword(0x60));
-        if (!pPeb || !pPeb->Ldr)
+        if (!pPeb || !pPeb->Ldr) 
             return nullptr;
 
         auto pLdrData = pPeb->Ldr;
@@ -62,37 +60,32 @@ namespace native
         while (pCurrentEntry != pListHead)
         {
             auto pEntry = reinterpret_cast<SHARED_LDR_DATA_TABLE_ENTRY*>(CONTAINING_RECORD(pCurrentEntry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks));
-            if (pEntry->BaseDllName.Buffer)
-                if (calculateHashRuntimeCi(pEntry->BaseDllName.Buffer) == uModuleHash)
-                    return reinterpret_cast<HMODULE>(pEntry->DllBase);
+            if (pEntry->BaseDllName.Buffer && calculateHashRuntimeCi(pEntry->BaseDllName.Buffer) == uModuleHash)
+                return reinterpret_cast<HMODULE>(pEntry->DllBase);
 
             pCurrentEntry = pCurrentEntry->Flink;
         }
-
         return nullptr;
     }
 
-
     inline void* getExportAddress(HMODULE hModuleBase, const char* szExportName)
     {
-        if (!hModuleBase || !szExportName)
+        if (!hModuleBase || !szExportName) 
             return nullptr;
 
         auto pBase = reinterpret_cast<uint8_t*>(hModuleBase);
         auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(pBase);
-        if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+        if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE) 
             return nullptr;
 
         auto pNtHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>(pBase + pDosHeader->e_lfanew);
-        if (pNtHeaders->Signature != IMAGE_NT_SIGNATURE)
+        if (pNtHeaders->Signature != IMAGE_NT_SIGNATURE) 
             return nullptr;
 
         auto uExportDirRva = pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-        if (!uExportDirRva)
-            return nullptr;
+        if (!uExportDirRva) return nullptr;
 
         auto pExportDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(pBase + uExportDirRva);
-
         auto pNamesRVA = reinterpret_cast<uint32_t*>(pBase + pExportDir->AddressOfNames);
         auto pOrdinalsRVA = reinterpret_cast<uint16_t*>(pBase + pExportDir->AddressOfNameOrdinals);
         auto pFunctionsRVA = reinterpret_cast<uint32_t*>(pBase + pExportDir->AddressOfFunctions);
@@ -101,33 +94,34 @@ namespace native
         {
             const char* szCurrentProcName = reinterpret_cast<const char*>(pBase + pNamesRVA[i]);
 
-            if (strcmp(szCurrentProcName, szExportName) == 0)
+            if (crt::string::compare(szCurrentProcName, szExportName) == 0)
             {
                 uint16_t usOrdinal = pOrdinalsRVA[i];
                 uint32_t uFunctionRva = pFunctionsRVA[usOrdinal];
-
                 auto uExportSectionStart = uExportDirRva;
                 auto uExportSectionEnd = uExportSectionStart + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
                 if (uFunctionRva >= uExportSectionStart && uFunctionRva < uExportSectionEnd)
                 {
                     char szForwarderString[256];
-                    strcpy_s(szForwarderString, sizeof(szForwarderString), reinterpret_cast<const char*>(pBase + uFunctionRva));
+                    crt::string::copy(szForwarderString, sizeof(szForwarderString), reinterpret_cast<const char*>(pBase + uFunctionRva));
 
-                    char* szSeparator = strchr(szForwarderString, '.');
-                    if (!szSeparator) return nullptr;
+                    char* szSeparator = crt::string::findChar(szForwarderString, '.');
+                    if (!szSeparator) 
+                        return nullptr;
 
                     *szSeparator = '\0';
                     char* szForwarderFuncName = szSeparator + 1;
                     char* szForwarderDllName = szForwarderString;
 
                     wchar_t wzWideDllName[260];
-                    size_t uCConvertedChars = 0;
-                    mbstowcs_s(&uCConvertedChars, wzWideDllName, _countof(wzWideDllName), szForwarderDllName, _TRUNCATE);
-                    wcscat_s(wzWideDllName, _countof(wzWideDllName), L".dll");
+
+                    crt::string::mbToWcs(wzWideDllName, crt::getCountOf(wzWideDllName), szForwarderDllName);
+                    crt::string::concat(wzWideDllName, crt::getCountOf(wzWideDllName), L".dll");
 
                     HMODULE hForwarderModuleBase = getModuleBase(wzWideDllName);
-                    if (!hForwarderModuleBase) return nullptr;
+                    if (!hForwarderModuleBase) 
+                        return nullptr;
 
                     return getExportAddress(hForwarderModuleBase, szForwarderFuncName);
                 }
@@ -135,30 +129,28 @@ namespace native
                     return pBase + uFunctionRva;
             }
         }
-
         return nullptr;
     }
 
     inline void* getExportAddress(HMODULE hModuleBase, hashing::Hash_t uExportHash)
     {
-        if (!hModuleBase)
+        if (!hModuleBase) 
             return nullptr;
 
         auto pBase = reinterpret_cast<uint8_t*>(hModuleBase);
         auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(pBase);
-        if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+        if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE) 
             return nullptr;
 
         auto pNtHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>(pBase + pDosHeader->e_lfanew);
-        if (pNtHeaders->Signature != IMAGE_NT_SIGNATURE)
+        if (pNtHeaders->Signature != IMAGE_NT_SIGNATURE) 
             return nullptr;
 
         auto uExportDirRva = pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-        if (!uExportDirRva)
+        if (!uExportDirRva) 
             return nullptr;
 
         auto pExportDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(pBase + uExportDirRva);
-
         auto pNamesRVA = reinterpret_cast<uint32_t*>(pBase + pExportDir->AddressOfNames);
         auto pOrdinalsRVA = reinterpret_cast<uint16_t*>(pBase + pExportDir->AddressOfNameOrdinals);
         auto pFunctionsRVA = reinterpret_cast<uint32_t*>(pBase + pExportDir->AddressOfFunctions);
@@ -171,16 +163,15 @@ namespace native
             {
                 uint16_t usOrdinal = pOrdinalsRVA[i];
                 uint32_t uFunctionRva = pFunctionsRVA[usOrdinal];
-
                 auto uExportSectionStart = uExportDirRva;
                 auto uExportSectionEnd = uExportSectionStart + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
                 if (uFunctionRva >= uExportSectionStart && uFunctionRva < uExportSectionEnd)
                 {
                     char szForwarderString[256];
-                    strcpy_s(szForwarderString, sizeof(szForwarderString), reinterpret_cast<const char*>(pBase + uFunctionRva));
+                    crt::string::copy(szForwarderString, sizeof(szForwarderString), reinterpret_cast<const char*>(pBase + uFunctionRva));
 
-                    char* szSeparator = strchr(szForwarderString, '.');
+                    char* szSeparator = crt::string::findChar(szForwarderString, '.');
                     if (!szSeparator) 
                         return nullptr;
 
@@ -189,15 +180,13 @@ namespace native
                     char* szForwarderDllName = szForwarderString;
 
                     wchar_t wzWideDllName[260];
-                    size_t uCConvertedChars = 0;
-                    mbstowcs_s(&uCConvertedChars, wzWideDllName, _countof(wzWideDllName), szForwarderDllName, _TRUNCATE);
-                    wcscat_s(wzWideDllName, _countof(wzWideDllName), L".dll");
+                    crt::string::mbToWcs(wzWideDllName, crt::getCountOf(wzWideDllName), szForwarderDllName);
+                    crt::string::concat(wzWideDllName, crt::getCountOf(wzWideDllName), L".dll");
 
                     hashing::Hash_t uForwarderDllHash = calculateHashRuntimeCi(wzWideDllName);
                     HMODULE hForwarderModuleBase = getModuleBase(uForwarderDllHash);
                     if (!hForwarderModuleBase) 
                         return nullptr;
-
 
                     hashing::Hash_t uForwarderFuncHash = hashing::calculateHashRuntime(szForwarderFuncName);
                     return getExportAddress(hForwarderModuleBase, uForwarderFuncHash);
@@ -206,9 +195,8 @@ namespace native
                     return pBase + uFunctionRva;
             }
         }
-
         return nullptr;
     }
 }
 
-#endif 
+#endif

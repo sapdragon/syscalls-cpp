@@ -72,7 +72,7 @@ namespace native
                     strcpy_s(szForwarderString, sizeof(szForwarderString), reinterpret_cast<const char*>(pBase + uFunctionRva));
 
                     char* szSeparator = strchr(szForwarderString, '.');
-                    if (!szSeparator) 
+                    if (!szSeparator)
                         return nullptr;
 
                     *szSeparator = '\0';

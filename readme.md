@@ -50,7 +50,7 @@ int main() {
     SIZE_T uSize = 0x1000;
 
     syscallManager.invoke<NTSTATUS>(
-        "NtAllocateVirtualMemory",
+        SYSCALL_ID("NtAllocateVirtualMemory"),
         NtCurrentProcess(),
         &baseAdpBaseAddressdress,
         0, &uSize,
@@ -68,6 +68,13 @@ int main() {
 ## Extensibility
 
 The true power of the framework is its extensibility. You can easily write your own policies. Simply create a class that satisfies the required `concept` (`IsAllocationPolicy` or `IsStubGenerationPolicy`), and it will be seamlessly compatible with the `Manager`.
+
+## Configuration
+
+For easier debugging, you can disable the compile-time hashing mechanism by defining the `SYSCALLS_NO_HASH` macro. This will cause the manager to use `std::string` for syscall names instead of integer hashes.
+
+-   **MSVC:** `/DSYSCALLS_NO_HASH`
+-   **GCC/Clang:** `-DSYSCALLS_NO_HASH`
 
 ## Requirements
 

@@ -12,24 +12,23 @@
 #include <utility>
 #include <concepts> 
 #include <array>
+#include <algorithm>
 
 #include "shared.hpp"
-#include "native_api.hpp"
+#include "hash.hpp"
 
-namespace syscall 
+namespace syscall
 {
-    namespace policies 
+    namespace policies
     {
-        struct SectionAllocator 
+        struct SectionAllocator
         {
-            static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/) 
+            static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/)
             {
-                HMODULE hNtDll = native::getModuleBase(L"ntdll.dll");
-
-                auto fNtCreateSection = reinterpret_cast<NtCreateSection_t>(native::getExportAddress(hNtDll, "NtCreateSection"));
-                auto fNtMapView = reinterpret_cast<NtMapViewOfSection_t>(native::getExportAddress(hNtDll, "NtMapViewOfSection"));
-                auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, "NtUnmapViewOfSection"));
-                if (!fNtCreateSection || !fNtMapView || !fNtUnmapView) 
+                auto fNtCreateSection = reinterpret_cast<NtCreateSection_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtCreateSection"));
+                auto fNtMapView = reinterpret_cast<NtMapViewOfSection_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtMapViewOfSection"));
+                auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtUnmapViewOfSection"));
+                if (!fNtCreateSection || !fNtMapView || !fNtUnmapView)
                     return false;
 
                 HANDLE hSectionHandle = nullptr;
@@ -37,16 +36,16 @@ namespace syscall
                 sectionSize.QuadPart = uRegionSize;
 
                 NTSTATUS status = fNtCreateSection(&hSectionHandle, SECTION_ALL_ACCESS, nullptr, &sectionSize, PAGE_EXECUTE_READWRITE, SEC_COMMIT | SEC_NO_CHANGE, nullptr);
-                if (!NT_SUCCESS(status)) 
+                if (!NT_SUCCESS(status))
                     return false;
 
                 void* pTempView = nullptr;
                 SIZE_T uViewSize = uRegionSize;
                 status = fNtMapView(hSectionHandle, NtCurrentProcess(), &pTempView, 0, 0, nullptr, &uViewSize, ViewShare, 0, PAGE_READWRITE);
-                if (!NT_SUCCESS(status)) 
-                { 
+                if (!NT_SUCCESS(status))
+                {
                     CloseHandle(hSectionHandle);
-                    return false; 
+                    return false;
                 }
 
                 memcpy(pTempView, vecBuffer.data(), uRegionSize);
@@ -56,13 +55,12 @@ namespace syscall
                 CloseHandle(hSectionHandle);
                 return NT_SUCCESS(status) && pOutRegion;
             }
-            static void release(void* pRegion, HANDLE /*hHeapHandle*/) 
+            static void release(void* pRegion, HANDLE /*hHeapHandle*/)
             {
-                HMODULE hNtDll = native::getModuleBase(L"ntdll.dll");
-                if (pRegion) 
+                if (pRegion)
                 {
-                    auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, "NtUnmapViewOfSection"));
-                    if (fNtUnmapView) 
+                    auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtUnmapViewOfSection"));
+                    if (fNtUnmapView)
                         fNtUnmapView(NtCurrentProcess(), pRegion);
                 }
             }
@@ -72,21 +70,19 @@ namespace syscall
         {
             static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& hOutHeapHandle)
             {
-                HMODULE hNtdll = native::getModuleBase(L"ntdll.dll");
-                if (!hNtdll)
+                using HeapCreate_t = HANDLE(WINAPI*)(DWORD, SIZE_T, SIZE_T);
+                using HeapAlloc_t = LPVOID(WINAPI*)(HANDLE, DWORD, SIZE_T);
+                auto fHeapCreate = reinterpret_cast<HeapCreate_t>(GetProcAddress(GetModuleHandleA("kernel32.dll"), "HeapCreate"));
+                auto fHeapAlloc = reinterpret_cast<HeapAlloc_t>(GetProcAddress(GetModuleHandleA("kernel32.dll"), "HeapAlloc"));
+
+                if (!fHeapCreate || !fHeapAlloc)
                     return false;
 
-                auto fRtlCreateHeap = reinterpret_cast<RtlCreateHeap_t>(native::getExportAddress(hNtdll, "RtlCreateHeap"));
-                auto fRtlAllocateHeap = reinterpret_cast<RtlAllocateHeap_t>(native::getExportAddress(hNtdll, "RtlAllocateHeap"));
-
-                if (!fRtlCreateHeap || !fRtlAllocateHeap)
-                    return false;
-
-                hOutHeapHandle = fRtlCreateHeap(HEAP_CREATE_ENABLE_EXECUTE, nullptr, 0, 0, nullptr, nullptr);
+                hOutHeapHandle = fHeapCreate(HEAP_CREATE_ENABLE_EXECUTE, 0, 0);
                 if (!hOutHeapHandle)
                     return false;
 
-                pOutRegion = fRtlAllocateHeap(hOutHeapHandle, 0, uRegionSize);
+                pOutRegion = fHeapAlloc(hOutHeapHandle, 0, uRegionSize);
                 if (!pOutRegion)
                 {
                     release(nullptr, hOutHeapHandle);
@@ -97,31 +93,25 @@ namespace syscall
                 memcpy(pOutRegion, vecBuffer.data(), uRegionSize);
                 return true;
             }
-
             static void release(void* /*region*/, HANDLE hHeapHandle)
             {
                 if (hHeapHandle)
                 {
-                    HMODULE hNtdll = native::getModuleBase(L"ntdll.dll");
-                    if (!hNtdll)
-                        return;
-
-                    auto fRtlDestroyHeap = reinterpret_cast<RtlDestroyHeap_t>(native::getExportAddress(hNtdll, "RtlDestroyHeap"));
-                    if (fRtlDestroyHeap)
-                        fRtlDestroyHeap(hHeapHandle);
+                    using HeapDestroy_t = BOOL(WINAPI*)(HANDLE);
+                    auto fHeapDestroy = reinterpret_cast<HeapDestroy_t>(GetProcAddress(GetModuleHandleA("kernel32.dll"), "HeapDestroy"));
+                    if (fHeapDestroy)
+                        fHeapDestroy(hHeapHandle);
                 }
             }
         };
 
-        struct VirtualMemoryAllocator 
+        struct VirtualMemoryAllocator
         {
-            static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/) 
+            static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/)
             {
-                HMODULE hNtDll = native::getModuleBase(L"ntdll.dll");
-
-                auto fNtAllocate = reinterpret_cast<NtAllocateVirtualMemory_t>(native::getExportAddress(hNtDll, "NtAllocateVirtualMemory"));
-                auto fNtProtect = reinterpret_cast<NtProtectVirtualMemory_t>(native::getExportAddress(hNtDll, "NtProtectVirtualMemory"));
-                if (!fNtAllocate || !fNtProtect) 
+                auto fNtAllocate = reinterpret_cast<NtAllocateVirtualMemory_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtAllocateVirtualMemory"));
+                auto fNtProtect = reinterpret_cast<NtProtectVirtualMemory_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtProtectVirtualMemory"));
+                if (!fNtAllocate || !fNtProtect)
                     return false;
 
                 pOutRegion = nullptr;
@@ -137,7 +127,7 @@ namespace syscall
                 uSize = uRegionSize;
                 status = fNtProtect(NtCurrentProcess(), &pOutRegion, &uSize, PAGE_EXECUTE_READ, &oldProtection);
 
-                if (!NT_SUCCESS(status)) 
+                if (!NT_SUCCESS(status))
                 {
                     uSize = 0;
                     fNtAllocate(NtCurrentProcess(), &pOutRegion, 0, &uSize, MEM_RELEASE, 0);
@@ -148,23 +138,21 @@ namespace syscall
                 return true;
             }
 
-            static void release(void* pRegion, HANDLE /*heapHandle*/) 
+            static void release(void* pRegion, HANDLE /*heapHandle*/)
             {
-                HMODULE hNtDll = native::getModuleBase(L"ntdll.dll");
-
-                if (pRegion) 
+                if (pRegion)
                 {
-                    auto fNtFree = reinterpret_cast<NtFreeVirtualMemory_t>(native::getExportAddress(hNtDll, "NtFreeVirtualMemory"));
+                    auto fNtFree = reinterpret_cast<NtFreeVirtualMemory_t>(GetProcAddress(GetModuleHandleA("ntdll.dll"), "NtFreeVirtualMemory"));
                     if (fNtFree)
                     {
-                        SIZE_T uSize = 0; 
+                        SIZE_T uSize = 0;
                         fNtFree(NtCurrentProcess(), &pRegion, &uSize, MEM_RELEASE);
                     }
                 }
             }
         };
 
-        struct GadgetStubGenerator 
+        struct GadgetStubGenerator
         {
             static constexpr bool bRequiresGadget = true;
             static constexpr size_t getStubSize() { return 32; }
@@ -193,11 +181,11 @@ namespace syscall
             }
         };
 
-        struct DirectStubGenerator 
+        struct DirectStubGenerator
         {
             static constexpr bool bRequiresGadget = false;
 
-            inline static constexpr std::array<uint8_t, 18> arrShellcode = 
+            inline static constexpr std::array<uint8_t, 18> arrShellcode =
             {
                 0x51,                               // push rcx
                 0x41, 0x5A,                         // pop r10
@@ -218,33 +206,40 @@ namespace syscall
     }
 
     template<typename T>
-    concept IsIAllocationPolicy = requires(size_t uSize, const std::vector<uint8_t>& vecBuffer, void*& pRegion, HANDLE & hObject) 
+    concept IsIAllocationPolicy = requires(size_t uSize, const std::vector<uint8_t>&vecBuffer, void*& pRegion, HANDLE & hObject)
     {
         { T::allocate(uSize, vecBuffer, pRegion, hObject) } -> std::convertible_to<bool>;
         { T::release(pRegion, hObject) } -> std::same_as<void>;
     };
 
     template<typename T>
-    concept IsStubGenerationPolicy = requires(uint8_t * pBuffer, uint32_t uSyscallNumber, void* pGadget) 
+    concept IsStubGenerationPolicy = requires(uint8_t * pBuffer, uint32_t uSyscallNumber, void* pGadget)
     {
         { T::bRequiresGadget } -> std::same_as<const bool&>;
         { T::getStubSize() } -> std::convertible_to<size_t>;
         { T::generate(pBuffer, uSyscallNumber, pGadget) } -> std::same_as<void>;
     };
 
-    struct SyscallEntry_t 
+#ifdef SYSCALLS_NO_HASH
+    using SyscallKey_t = std::string;
+#else
+    using SyscallKey_t = hashing::Hash_t;
+#endif
+
+    struct SyscallEntry_t
     {
-        std::string m_sName;
+        SyscallKey_t m_key;
         uint32_t m_uSyscallNumber;
         uint32_t m_uOffset;
     };
 
+
     template<IsIAllocationPolicy IAllocationPolicy, IsStubGenerationPolicy IStubGenerationPolicy>
-    class Manager 
+    class Manager
     {
     private:
         std::mutex m_mutex;
-        std::unordered_map<std::string, SyscallEntry_t> m_mapParsedSyscalls;
+        std::vector<SyscallEntry_t> m_vecParsedSyscalls;
         void* m_pSyscallRegion = nullptr;
         void* m_pSyscallGadget = nullptr;
         size_t m_uRegionSize = 0;
@@ -252,17 +247,17 @@ namespace syscall
         HANDLE m_hObjectHandle = nullptr;
     public:
         Manager() = default;
-        ~Manager() 
+        ~Manager()
         {
-            IAllocationPolicy::release(m_pSyscallRegion, m_hObjectHandle); 
+            IAllocationPolicy::release(m_pSyscallRegion, m_hObjectHandle);
         }
 
         Manager(const Manager&) = delete;
         Manager& operator=(const Manager&) = delete;
-        Manager(Manager&& other) noexcept 
+        Manager(Manager&& other) noexcept
         {
             std::lock_guard<std::mutex> lock(other.m_mutex);
-            m_mapParsedSyscalls = std::move(other.m_mapParsedSyscalls);
+            m_vecParsedSyscalls = std::move(other.m_vecParsedSyscalls);
             m_pSyscallRegion = other.m_pSyscallRegion;
             m_pSyscallGadget = other.m_pSyscallGadget;
             m_uRegionSize = other.m_uRegionSize;
@@ -272,13 +267,13 @@ namespace syscall
             other.m_hObjectHandle = nullptr;
         }
 
-        Manager& operator=(Manager&& other) noexcept 
+        Manager& operator=(Manager&& other) noexcept
         {
-            if (this != &other) 
+            if (this != &other)
             {
                 std::scoped_lock lock(m_mutex, other.m_mutex);
                 IAllocationPolicy::release(m_pSyscallRegion, m_hObjectHandle);
-                m_mapParsedSyscalls = std::move(other.m_mapParsedSyscalls);
+                m_vecParsedSyscalls = std::move(other.m_vecParsedSyscalls);
                 m_pSyscallRegion = other.m_pSyscallRegion;
                 m_pSyscallGadget = other.m_pSyscallGadget;
                 m_uRegionSize = other.m_uRegionSize;
@@ -291,7 +286,7 @@ namespace syscall
             return *this;
         }
 
-        bool initialize() 
+        bool initialize()
         {
             if (m_bInitialized)
                 return true;
@@ -308,56 +303,65 @@ namespace syscall
             if (!extractSyscallsFromExceptionDir())
             {
                 // @note / SapDragon: fallback if the primary one fails
-                m_mapParsedSyscalls.clear();
+                m_vecParsedSyscalls.clear();
                 if (!extractSyscallsByScanning())
-                    return false; 
+                    return false;
             }
+
+            std::sort(m_vecParsedSyscalls.begin(), m_vecParsedSyscalls.end(),
+                [](const SyscallEntry_t& a, const SyscallEntry_t& b) {
+                    return a.m_key < b.m_key;
+                });
 
             m_bInitialized = createSyscalls();
             return m_bInitialized;
         }
 
         template<typename Ret, typename... Args>
-        SYSCALL_FORCE_INLINE Ret invoke(const std::string& sSyscallName, Args... args)
+        SYSCALL_FORCE_INLINE Ret invoke(const SyscallKey_t& syscallId, Args... args)
         {
-            if (!m_bInitialized) 
+            if (!m_bInitialized)
             {
-                if (!initialize()) 
+                if (!initialize())
                 {
-                    if constexpr (std::is_same_v<Ret, NTSTATUS>) 
+                    if constexpr (std::is_same_v<Ret, NTSTATUS>)
                         return STATUS_UNSUCCESSFUL;
 
                     return Ret{};
                 }
             }
-            auto it = m_mapParsedSyscalls.find(sSyscallName);
-            if (it == m_mapParsedSyscalls.end()) 
-            {
-                if constexpr (std::is_same_v<Ret, NTSTATUS>) 
-                    return STATUS_PROCEDURE_NOT_FOUND;
+            auto it = std::lower_bound(m_vecParsedSyscalls.begin(), m_vecParsedSyscalls.end(), syscallId,
+                [](const SyscallEntry_t& entry, const SyscallKey_t& id) {
+                    return entry.m_key < id;
+                });
 
+            if (it == m_vecParsedSyscalls.end() || it->m_key != syscallId)
+            {
+                if constexpr (std::is_same_v<Ret, NTSTATUS>)
+                    return STATUS_PROCEDURE_NOT_FOUND;
                 return Ret{};
             }
 
             using Function_t = Ret(NTAPI*)(Args...);
-            uint8_t* pStubAddress = reinterpret_cast<uint8_t*>(m_pSyscallRegion) + it->second.m_uOffset;
+
+            uint8_t* pStubAddress = reinterpret_cast<uint8_t*>(m_pSyscallRegion) + it->m_uOffset;
             auto fStub = reinterpret_cast<Function_t>(pStubAddress);
             return fStub(std::forward<Args>(args)...);
         }
     private:
-        bool createSyscalls() 
+        bool createSyscalls()
         {
-            if (m_mapParsedSyscalls.empty()) 
+            if (m_vecParsedSyscalls.empty())
                 return false;
 
-            if constexpr (IStubGenerationPolicy::bRequiresGadget) 
-                if (!m_pSyscallGadget) 
+            if constexpr (IStubGenerationPolicy::bRequiresGadget)
+                if (!m_pSyscallGadget)
                     return false;
 
-            m_uRegionSize = m_mapParsedSyscalls.size() * IStubGenerationPolicy::getStubSize();
+            m_uRegionSize = m_vecParsedSyscalls.size() * IStubGenerationPolicy::getStubSize();
             std::vector<uint8_t> vecTempBuffer(m_uRegionSize);
-            for (const auto& syscallPair : m_mapParsedSyscalls) {
-                const SyscallEntry_t& entry = syscallPair.second;
+
+            for (const SyscallEntry_t& entry : m_vecParsedSyscalls) {
                 uint8_t* stubLocation = vecTempBuffer.data() + entry.m_uOffset;
                 IStubGenerationPolicy::generate(stubLocation, entry.m_uSyscallNumber, m_pSyscallGadget);
             }
@@ -365,7 +369,7 @@ namespace syscall
             return IAllocationPolicy::allocate(m_uRegionSize, vecTempBuffer, m_pSyscallRegion, m_hObjectHandle);
         }
 
-        struct NtdllInfo_t 
+        struct NtdllInfo_t
         {
             uint8_t* m_pNtdllBase = nullptr;
             IMAGE_NT_HEADERS* m_pNtHeaders = nullptr;
@@ -374,27 +378,36 @@ namespace syscall
 
         static bool getNtdll(NtdllInfo_t& info)
         {
-            HMODULE hNtdll = native::getModuleBase(L"ntdll.dll");
-            if (!hNtdll)
+            auto pPeb = reinterpret_cast<PPEB>(__readgsqword(0x60));
+
+            if (!pPeb || !pPeb->Ldr)
                 return false;
 
-            info.m_pNtdllBase = reinterpret_cast<uint8_t*>(hNtdll);
+            auto pLdrData = pPeb->Ldr;
+            auto pModuleList = &pLdrData->InMemoryOrderModuleList;
+            auto pListEntry = pModuleList->Flink;
 
-            auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(info.m_pNtdllBase);
-            if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
-                return false;
+            for (; pListEntry != pModuleList; pListEntry = pListEntry->Flink)
+            {
+                auto pEntry = reinterpret_cast <SHARED_LDR_DATA_TABLE_ENTRY*>(CONTAINING_RECORD(pListEntry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks));
 
-            info.m_pNtHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>(info.m_pNtdllBase + pDosHeader->e_lfanew);
-            if (info.m_pNtHeaders->Signature != IMAGE_NT_SIGNATURE)
-                return false;
-
-            auto uExportRva = info.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-            if (!uExportRva) 
-                return false;
-
-            info.m_pExportDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(info.m_pNtdllBase + uExportRva);
-
-            return true;
+                const wchar_t* wcName = pEntry->BaseDllName.Buffer;
+                if (pEntry->BaseDllName.Length == 18 && wcName &&
+                    (wcName[0] | 0x20) == L'n' && (wcName[1] | 0x20) == L't' &&
+                    (wcName[2] | 0x20) == L'd' && (wcName[3] | 0x20) == L'l' &&
+                    (wcName[4] | 0x20) == L'l' && wcName[5] == L'.' &&
+                    (wcName[6] | 0x20) == L'd' && (wcName[7] | 0x20) == L'l' &&
+                    (wcName[8] | 0x20) == L'l')
+                {
+                    info.m_pNtdllBase = reinterpret_cast<uint8_t*>(pEntry->DllBase);
+                    auto pDosHeader = reinterpret_cast<IMAGE_DOS_HEADER*>(info.m_pNtdllBase);
+                    info.m_pNtHeaders = reinterpret_cast<IMAGE_NT_HEADERS*>(info.m_pNtdllBase + pDosHeader->e_lfanew);
+                    auto uExportRva = info.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+                    info.m_pExportDir = reinterpret_cast<IMAGE_EXPORT_DIRECTORY*>(info.m_pNtdllBase + uExportRva);
+                    return true;
+                }
+            }
+            return false;
         }
 
         bool extractSyscallsFromExceptionDir()
@@ -434,24 +447,28 @@ namespace syscall
                 auto it = mapRvaToName.find(pFunction->BeginAddress);
                 if (it != mapRvaToName.end())
                 {
+
                     const char* szName = it->second;
                     if (szName[0] == 'Z' && szName[1] == 'w')
                     {
-                        std::string sName = szName;
-                        sName[0] = 'N';
-                        sName[1] = 't';
+                        char szNtName[128];
+                        strcpy_s(szNtName, szName);
+                        szNtName[0] = 'N';
+                        szNtName[1] = 't';
 
-                        m_mapParsedSyscalls[sName] = SyscallEntry_t{
-                             sName,
-                             uSyscallNumber,
-                             static_cast<uint32_t>(m_mapParsedSyscalls.size() * IStubGenerationPolicy::getStubSize())
-                        };
+                        const SyscallKey_t key = SYSCALL_ID_RT(szNtName);
+
+                        m_vecParsedSyscalls.push_back(SyscallEntry_t{
+                                    key,
+                                    uSyscallNumber,
+                                    static_cast<uint32_t>((m_vecParsedSyscalls.size() * IStubGenerationPolicy::getStubSize()))
+                            });
                         uSyscallNumber++;
                     }
                 }
             }
 
-            return !m_mapParsedSyscalls.empty();
+            return !m_vecParsedSyscalls.empty();
         }
 
         bool extractSyscallsByScanning()
@@ -483,7 +500,7 @@ namespace syscall
 
                 bool bIsHooked = false;
                 // @note / SapDragon: mov r10, rcx; mov eax, syscallNumber
-                if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C) 
+                if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C)
                     uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 4);
                 else if (isFunctionHooked(pFunctionStart))
                     bIsHooked = true;
@@ -520,16 +537,15 @@ namespace syscall
 
                 if (uSyscallNumber)
                 {
-                    std::string sName = szName;
-                    m_mapParsedSyscalls[sName] = SyscallEntry_t
-                    {
-                         sName,
-                         uSyscallNumber,
-                         static_cast<uint32_t>((m_mapParsedSyscalls.size() * IStubGenerationPolicy::getStubSize()))
-                    };
+                    const SyscallKey_t key = SYSCALL_ID_RT(szName);
+                    m_vecParsedSyscalls.push_back(SyscallEntry_t{
+                                key,
+                                uSyscallNumber,
+                                static_cast<uint32_t>((m_vecParsedSyscalls.size() * IStubGenerationPolicy::getStubSize()))
+                        });
                 }
             }
-            return !m_mapParsedSyscalls.empty();
+            return !m_vecParsedSyscalls.empty();
         }
 
         bool findSyscallGadget()

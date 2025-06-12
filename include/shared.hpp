@@ -140,4 +140,4 @@ struct SHARED_LDR_DATA_TABLE_ENTRY
 #define STR_ICMP wcscasecmp
 #endif
 
-#endif
+#endif  

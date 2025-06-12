@@ -454,7 +454,7 @@ namespace syscall
                 {
 
                     const char* szName = it->second;
-                    if (szName[0] == 'Z' && szName[1] == 'w')
+                    if (hashing::calculateHashRuntime(szName, 2) == hashing::calculateHash("Zw"))
                     {
                         char szNtName[128];
                         strcpy_s(szNtName, szName);
@@ -490,7 +490,7 @@ namespace syscall
             {
                 const char* szName = reinterpret_cast<const char*>(ntdll.m_pNtdllBase + pNamesRVA[i]);
 
-                if (strncmp(szName, "Nt", 2) != 0)
+                if (hashing::calculateHashRuntime(szName, 2) != hashing::calculateHash("Nt"))
                     continue;
 
                 uint16_t uOrdinal = pOrdinalsRva[i];
@@ -559,15 +559,15 @@ namespace syscall
             if (!getNtdll(ntdll))
                 return false;
 
-            IMAGE_SECTION_HEADER* sections = IMAGE_FIRST_SECTION(ntdll.m_pNtHeaders);
+            IMAGE_SECTION_HEADER* pSections = IMAGE_FIRST_SECTION(ntdll.m_pNtHeaders);
             uint8_t* pTextSection = nullptr;
             uint32_t uTextSectionSize = 0;
             for (int i = 0; i < ntdll.m_pNtHeaders->FileHeader.NumberOfSections; ++i)
             {
-                if (strcmp(reinterpret_cast<char*>(sections[i].Name), ".text") == 0)
+                if (hashing::calculateHashRuntime(reinterpret_cast<const char*>(pSections[i].Name)) == hashing::calculateHash(".text"))
                 {
-                    pTextSection = ntdll.m_pNtdllBase + sections[i].VirtualAddress;
-                    uTextSectionSize = sections[i].Misc.VirtualSize;
+                    pTextSection = ntdll.m_pNtdllBase + pSections[i].VirtualAddress;
+                    uTextSectionSize = pSections[i].Misc.VirtualSize;
                     break;
                 }
             }

@@ -167,7 +167,6 @@ namespace native
         {
             const char* szCurrentProcName = reinterpret_cast<const char*>(pBase + pNamesRVA[i]);
 
-
             if (hashing::calculateHashRuntime(szCurrentProcName) == uExportHash)
             {
                 uint16_t usOrdinal = pOrdinalsRVA[i];
@@ -182,7 +181,8 @@ namespace native
                     strcpy_s(szForwarderString, sizeof(szForwarderString), reinterpret_cast<const char*>(pBase + uFunctionRva));
 
                     char* szSeparator = strchr(szForwarderString, '.');
-                    if (!szSeparator) return nullptr;
+                    if (!szSeparator) 
+                        return nullptr;
 
                     *szSeparator = '\0';
                     char* szForwarderFuncName = szSeparator + 1;
@@ -195,7 +195,8 @@ namespace native
 
                     hashing::Hash_t uForwarderDllHash = calculateHashRuntimeCi(wzWideDllName);
                     HMODULE hForwarderModuleBase = getModuleBase(uForwarderDllHash);
-                    if (!hForwarderModuleBase) return nullptr;
+                    if (!hForwarderModuleBase) 
+                        return nullptr;
 
 
                     hashing::Hash_t uForwarderFuncHash = hashing::calculateHashRuntime(szForwarderFuncName);

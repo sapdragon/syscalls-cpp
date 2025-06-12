@@ -39,12 +39,35 @@ namespace hashing
         return hash;
     }
 
-    Hash_t calculateHashRuntime(const char* szData)
+    consteval Hash_t calculateHash(const char* szData, size_t uLength)
+    {
+        Hash_t hash = polyKey1;
+        for (size_t i = 0; i < uLength && szData[i]; ++i)
+        {
+            hash ^= static_cast<Hash_t>(szData[i]);
+            hash += std::rotr(hash, 11) + polyKey2;
+        }
+        return hash;
+    }
+
+
+    inline Hash_t calculateHashRuntime(const char* szData)
     {
         Hash_t hash = polyKey1;
         while (*szData)
         {
             hash ^= static_cast<Hash_t>(*szData++);
+            hash += std::rotr(hash, 11) + polyKey2;
+        }
+        return hash;
+    }
+
+    inline Hash_t calculateHashRuntime(const char* szData, size_t uLength)
+    {
+        Hash_t hash = polyKey1;
+        for (size_t i = 0; i < uLength && szData[i]; ++i)
+        {
+            hash ^= static_cast<Hash_t>(szData[i]);
             hash += std::rotr(hash, 11) + polyKey2;
         }
         return hash;

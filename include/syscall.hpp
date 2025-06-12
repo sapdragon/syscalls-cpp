@@ -20,6 +20,55 @@
 
 namespace syscall
 {
+
+    thread_local struct ExceptionContext_t 
+    {
+        bool m_bShouldHandle = false;
+        const void* m_pExpectedExceptionAddress = nullptr;
+        void* m_pSyscallGadget = nullptr;
+        uint32_t m_uSyscallNumber = 0;
+    } pExceptionContext;
+
+    class CExceptionContextGuard
+    {
+    public:
+        CExceptionContextGuard(const void* pExpectedAddress, void* pSyscallGadget, uint32_t uSyscallNumber)
+        {
+            pExceptionContext.m_bShouldHandle = true;
+            pExceptionContext.m_pExpectedExceptionAddress = pExpectedAddress;
+            pExceptionContext.m_pSyscallGadget = pSyscallGadget;
+            pExceptionContext.m_uSyscallNumber = uSyscallNumber;
+        }
+
+        ~CExceptionContextGuard()
+        {
+            pExceptionContext.m_bShouldHandle = false;
+        }
+
+        CExceptionContextGuard(const CExceptionContextGuard&) = delete;
+        CExceptionContextGuard& operator=(const CExceptionContextGuard&) = delete;
+    };
+
+    LONG NTAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
+    {
+        if (!pExceptionContext.m_bShouldHandle)
+            return EXCEPTION_CONTINUE_SEARCH;
+
+        if (pExceptionInfo->ExceptionRecord->ExceptionCode == EXCEPTION_ILLEGAL_INSTRUCTION &&
+            pExceptionInfo->ExceptionRecord->ExceptionAddress == pExceptionContext.m_pExpectedExceptionAddress)
+        {
+            pExceptionContext.m_bShouldHandle = false;
+
+            pExceptionInfo->ContextRecord->R10 = pExceptionInfo->ContextRecord->Rcx;
+            pExceptionInfo->ContextRecord->Rax = pExceptionContext.m_uSyscallNumber;
+            pExceptionInfo->ContextRecord->Rip = reinterpret_cast<uintptr_t>(pExceptionContext.m_pSyscallGadget);
+
+            return EXCEPTION_CONTINUE_EXECUTION;
+        }
+
+        return EXCEPTION_CONTINUE_SEARCH;
+    }
+
     namespace policies
     {
         struct SectionAllocator
@@ -31,9 +80,8 @@ namespace syscall
                 auto fNtCreateSection = reinterpret_cast<NtCreateSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtCreateSection")));
                 auto fNtMapView = reinterpret_cast<NtMapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtMapViewOfSection")));
                 auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtUnmapViewOfSection")));
-                auto fNtCloseHandle = reinterpret_cast<NtCloseHandle_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtCloseHandle")));
-
-                if (!fNtCreateSection || !fNtMapView || !fNtUnmapView || !fNtCloseHandle)
+                auto fNtClose = reinterpret_cast<NtCloseHandle_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtClose")));
+                if (!fNtCreateSection || !fNtMapView || !fNtUnmapView || !fNtClose)
                     return false;
 
                 HANDLE hSectionHandle = nullptr;
@@ -49,7 +97,7 @@ namespace syscall
                 status = fNtMapView(hSectionHandle, NtCurrentProcess(), &pTempView, 0, 0, nullptr, &uViewSize, ViewShare, 0, PAGE_READWRITE);
                 if (!NT_SUCCESS(status))
                 {
-                    fNtCloseHandle(hSectionHandle);
+                    fNtClose(hSectionHandle);
                     return false;
                 }
 
@@ -57,7 +105,7 @@ namespace syscall
                 fNtUnmapView(NtCurrentProcess(), pTempView);
                 uViewSize = uRegionSize;
                 status = fNtMapView(hSectionHandle, NtCurrentProcess(), &pOutRegion, 0, 0, nullptr, &uViewSize, ViewShare, 0, PAGE_EXECUTE_READ);
-                fNtCloseHandle(hSectionHandle);
+                fNtClose(hSectionHandle);
                 return NT_SUCCESS(status) && pOutRegion;
             }
             static void release(void* pRegion, HANDLE /*hHeapHandle*/)
@@ -219,6 +267,20 @@ namespace syscall
                 *reinterpret_cast<uint32_t*>(pBuffer + 4) = uSyscallNumber;
             }
         };
+
+
+        struct ExceptionStubGenerator
+        {
+            static constexpr bool bRequiresGadget = true;
+            static constexpr size_t getStubSize() { return 8; }
+            static void generate(uint8_t* pBuffer, uint32_t /*uSyscallNumber*/, void* /*pGadgetAddress*/)
+            {
+                pBuffer[0] = 0x0F;
+                pBuffer[1] = 0x0B;
+                pBuffer[2] = 0xC3;
+                crt::memory::set(pBuffer + 2, 0x90, getStubSize() - 3);
+            }
+        };
     }
 
     template<typename T>
@@ -261,10 +323,14 @@ namespace syscall
         size_t m_uRegionSize = 0;
         bool m_bInitialized = false;
         HANDLE m_hObjectHandle = nullptr;
+        void* m_pVehHandle = nullptr;
     public:
         Manager() = default;
         ~Manager()
         {
+            if (m_pVehHandle)
+                RemoveVectoredExceptionHandler(m_pVehHandle);
+
             IAllocationPolicy::release(m_pSyscallRegion, m_hObjectHandle);
         }
 
@@ -330,6 +396,20 @@ namespace syscall
                 });
 
             m_bInitialized = createSyscalls();
+            if (m_bInitialized) 
+            {
+                if constexpr (std::is_same_v<IStubGenerationPolicy, policies::ExceptionStubGenerator>) 
+                {
+                    m_pVehHandle = AddVectoredExceptionHandler(1, VectoredExceptionHandler);
+                    if (!m_pVehHandle) 
+                    {
+                        IAllocationPolicy::release(m_pSyscallRegion, m_hObjectHandle);
+                        m_pSyscallRegion = nullptr;
+                        m_bInitialized = false;
+                    }
+                }
+            }
+
             return m_bInitialized;
         }
 
@@ -361,8 +441,15 @@ namespace syscall
             using Function_t = Ret(NTAPI*)(Args...);
 
             uint8_t* pStubAddress = reinterpret_cast<uint8_t*>(m_pSyscallRegion) + it->m_uOffset;
-            auto fStub = reinterpret_cast<Function_t>(pStubAddress);
-            return fStub(std::forward<Args>(args)...);
+
+            if constexpr (std::is_same_v<IStubGenerationPolicy, policies::ExceptionStubGenerator>)
+            {
+                CExceptionContextGuard contextGuard(pStubAddress, m_pSyscallGadget, it->m_uSyscallNumber);
+                return reinterpret_cast<Function_t>(pStubAddress)(std::forward<Args>(args)...);
+            }
+            else
+                return reinterpret_cast<Function_t>(pStubAddress)(std::forward<Args>(args)...);
+            
         }
     private:
         bool createSyscalls()

@@ -24,6 +24,7 @@ You can combine any allocation policy with any stub generation policy.
 | --------------------- | ----------------------------------------------------|
 | `GadgetStubGenerator` | Jumps to a `syscall; ret` gadget found in `ntdll.dll|
 | `DirectStubGenerator` | Uses a classic, self-contained `syscall` instruction|
+| `ExceptionStubGenerator` | Triggers a breakpoint (`ud2`) to perform the syscall via a custom Vectored Exception Handler (VEH). |
 
 ## Example: Crafting Your Strategy
 

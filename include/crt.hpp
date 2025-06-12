@@ -23,6 +23,16 @@ namespace crt
 
             return pDest;
         }
+
+        inline void* set(void* pDest, int iValue, size_t uCount) noexcept
+        {
+            auto* d = static_cast<unsigned char*>(pDest);
+            const unsigned char ucByteValue = static_cast<unsigned char>(iValue);
+            for (size_t i = 0; i < uCount; ++i)
+                d[i] = ucByteValue;
+
+            return pDest;
+        }
     }
 
     namespace string

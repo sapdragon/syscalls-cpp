@@ -26,11 +26,11 @@ namespace syscall
         {
             static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/)
             {
-                HMODULE hNtDll = native::getModuleBase(L"ntdll.dll");
+                HMODULE hNtDll = native::getModuleBase(SYSCALL_ID("ntdll.dll"));
 
-                auto fNtCreateSection = reinterpret_cast<NtCreateSection_t>(native::getExportAddress(hNtDll, "NtCreateSection"));
-                auto fNtMapView = reinterpret_cast<NtMapViewOfSection_t>(native::getExportAddress(hNtDll, "NtMapViewOfSection"));
-                auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, "NtUnmapViewOfSection"));
+                auto fNtCreateSection = reinterpret_cast<NtCreateSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtCreateSection")));
+                auto fNtMapView = reinterpret_cast<NtMapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtMapViewOfSection")));
+                auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtUnmapViewOfSection")));
                 if (!fNtCreateSection || !fNtMapView || !fNtUnmapView)
                     return false;
 
@@ -60,10 +60,10 @@ namespace syscall
             }
             static void release(void* pRegion, HANDLE /*hHeapHandle*/)
             {
-                HMODULE hNtDll = native::getModuleBase(L"ntdll.dll");
+                HMODULE hNtDll = native::getModuleBase(SYSCALL_ID("ntdll.dll"));
                 if (pRegion)
                 {
-                    auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, "NtUnmapViewOfSection"));
+                    auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtUnmapViewOfSection")));
                     if (fNtUnmapView)
                         fNtUnmapView(NtCurrentProcess(), pRegion);
                 }
@@ -74,12 +74,12 @@ namespace syscall
         {
             static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& hOutHeapHandle)
             {
-                HMODULE hNtdll = native::getModuleBase(L"ntdll.dll");
+                HMODULE hNtdll = native::getModuleBase(SYSCALL_ID("ntdll.dll"));
                 if (!hNtdll)
                     return false;
 
-                auto fRtlCreateHeap = reinterpret_cast<RtlCreateHeap_t>(native::getExportAddress(hNtdll, "RtlCreateHeap"));
-                auto fRtlAllocateHeap = reinterpret_cast<RtlAllocateHeap_t>(native::getExportAddress(hNtdll, "RtlAllocateHeap"));
+                auto fRtlCreateHeap = reinterpret_cast<RtlCreateHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlCreateHeap")));
+                auto fRtlAllocateHeap = reinterpret_cast<RtlAllocateHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlAllocateHeap")));
 
                 if (!fRtlCreateHeap || !fRtlAllocateHeap)
                     return false;
@@ -104,11 +104,11 @@ namespace syscall
             {
                 if (hHeapHandle)
                 {
-                    HMODULE hNtdll = native::getModuleBase(L"ntdll.dll");
+                    HMODULE hNtdll = native::getModuleBase(SYSCALL_ID("ntdll.dll"));
                     if (!hNtdll)
                         return;
 
-                    auto fRtlDestroyHeap = reinterpret_cast<RtlDestroyHeap_t>(native::getExportAddress(hNtdll, "RtlDestroyHeap"));
+                    auto fRtlDestroyHeap = reinterpret_cast<RtlDestroyHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlDestroyHeap")));
                     if (fRtlDestroyHeap)
                         fRtlDestroyHeap(hHeapHandle);
                 }
@@ -119,10 +119,10 @@ namespace syscall
         {
             static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/)
             {
-                HMODULE hNtDll = native::getModuleBase(L"ntdll.dll");
+                HMODULE hNtDll = native::getModuleBase(SYSCALL_ID("ntdll.dll"));
 
-                auto fNtAllocate = reinterpret_cast<NtAllocateVirtualMemory_t>(native::getExportAddress(hNtDll, "NtAllocateVirtualMemory"));
-                auto fNtProtect = reinterpret_cast<NtProtectVirtualMemory_t>(native::getExportAddress(hNtDll, "NtProtectVirtualMemory"));
+                auto fNtAllocate = reinterpret_cast<NtAllocateVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtAllocateVirtualMemory")));
+                auto fNtProtect = reinterpret_cast<NtProtectVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtProtectVirtualMemory")));
                 if (!fNtAllocate || !fNtProtect)
                     return false;
 
@@ -152,11 +152,11 @@ namespace syscall
 
             static void release(void* pRegion, HANDLE /*heapHandle*/)
             {
-                HMODULE hNtDll = native::getModuleBase(L"ntdll.dll");
+                HMODULE hNtDll = native::getModuleBase(SYSCALL_ID("ntdll.dll"));
 
                 if (pRegion)
                 {
-                    auto fNtFree = reinterpret_cast<NtFreeVirtualMemory_t>(native::getExportAddress(hNtDll, "NtFreeVirtualMemory"));
+                    auto fNtFree = reinterpret_cast<NtFreeVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtFreeVirtualMemory")));
                     if (fNtFree)
                     {
                         SIZE_T uSize = 0;
@@ -392,7 +392,7 @@ namespace syscall
 
         static bool getNtdll(NtdllInfo_t& info)
         {
-            HMODULE hNtdll = native::getModuleBase(L"ntdll.dll");
+            HMODULE hNtdll = native::getModuleBase(SYSCALL_ID("ntdll.dll"));
             if (!hNtdll)
                 return false;
 

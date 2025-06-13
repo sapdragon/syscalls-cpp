@@ -197,6 +197,18 @@ namespace native
         }
         return nullptr;
     }
+
+    SYSCALL_FORCE_INLINE uint64_t rdtscp()
+    {
+        unsigned int uProcessorId; 
+#if defined(_MSC_VER)
+        return __rdtscp(&uProcessorId);
+#elif defined(__GNUC__) || defined(__clang__)
+        return __builtin_ia32_rdtscp(&uProcessorId);
+#else
+#error "Compiler not supported for RDTSCP intrinsic"
+#endif
+    }
 }
 
 #endif

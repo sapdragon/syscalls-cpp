@@ -517,38 +517,6 @@ namespace syscall
             return IAllocationPolicy::allocate(m_uRegionSize, vecTempBuffer, m_pSyscallRegion, m_hObjectHandle);
         }
 
-        struct NtdllInfo_t
-        {
-            uint8_t* m_pNtdllBase = nullptr;
-            IMAGE_NT_HEADERS* m_pNtHeaders = nullptr;
-            IMAGE_EXPORT_DIRECTORY* m_pExportDir = nullptr;
-        };
-
-        static bool getNtdll(NtdllInfo_t& info)
-        {
-            HMODULE hNtdll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
-            if (!hNtdll)
-                return false;
-
-            info.m_pNtdllBase = reinterpret_cast<uint8_t*>(hNtdll);
-
-            auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(info.m_pNtdllBase);
-            if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
-                return false;
-
-            info.m_pNtHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>(info.m_pNtdllBase + pDosHeader->e_lfanew);
-            if (info.m_pNtHeaders->Signature != IMAGE_NT_SIGNATURE)
-                return false;
-
-            auto uExportRva = info.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-            if (!uExportRva)
-                return false;
-
-            info.m_pExportDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(info.m_pNtdllBase + uExportRva);
-
-            return true;
-        }
-
         std::vector<SyscallEntry_t> extractSyscallsFromExceptionDir(const ModuleInfo_t& module)
         {
             std::vector<SyscallEntry_t> vecFoundSyscalls;
@@ -718,8 +686,8 @@ namespace syscall
 
         bool findSyscallGadgets()
         {
-            NtdllInfo_t ntdll;
-            if (!getNtdll(ntdll))
+            ModuleInfo_t ntdll;
+            if (!getModuleInfo(SYSCALL_ID("ntdll.dll"), ntdll))
                 return false;
 
             IMAGE_SECTION_HEADER* pSections = IMAGE_FIRST_SECTION(ntdll.m_pNtHeaders);
@@ -729,7 +697,7 @@ namespace syscall
             {
                 if (hashing::calculateHashRuntime(reinterpret_cast<const char*>(pSections[i].Name)) == hashing::calculateHash(".text"))
                 {
-                    pTextSection = ntdll.m_pNtdllBase + pSections[i].VirtualAddress;
+                    pTextSection = ntdll.m_pModuleBase + pSections[i].VirtualAddress;
                     uTextSectionSize = pSections[i].Misc.VirtualSize;
                     break;
                 }

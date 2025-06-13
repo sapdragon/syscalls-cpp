@@ -22,6 +22,27 @@
 namespace syscall
 {
 
+    struct ModuleInfo_t
+    {
+        uint8_t* m_pModuleBase = nullptr;
+        IMAGE_NT_HEADERS* m_pNtHeaders = nullptr;
+        IMAGE_EXPORT_DIRECTORY* m_pExportDir = nullptr;
+    };
+
+#ifdef SYSCALLS_NO_HASH
+    using SyscallKey_t = std::string;
+#else
+    using SyscallKey_t = hashing::Hash_t;
+#endif
+
+    struct SyscallEntry_t
+    {
+        SyscallKey_t m_key;
+        uint32_t m_uSyscallNumber;
+        uint32_t m_uOffset;
+    };
+
+
     thread_local struct ExceptionContext_t
     {
         bool m_bShouldHandle = false;
@@ -72,6 +93,7 @@ namespace syscall
 
     namespace policies
     {
+        // @note / sapdragon: move to namespaces ( policies::allocator::section / policies::generator::direct / policies::parser::exceptions etc )
         struct SectionAllocator
         {
             static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/)
@@ -270,7 +292,6 @@ namespace syscall
             }
         };
 
-
         struct ExceptionStubGenerator
         {
             static constexpr bool bRequiresGadget = true;
@@ -283,7 +304,189 @@ namespace syscall
                 crt::memory::set(pBuffer + 2, 0x90, getStubSize() - 3);
             }
         };
+
+        struct ExceptionDirectoryParser
+        {
+            static std::vector<SyscallEntry_t> parse(const ModuleInfo_t& module)
+            {
+                std::vector<SyscallEntry_t> vecFoundSyscalls;
+
+                auto uExceptionDirRva = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress;
+                if (!uExceptionDirRva)
+                    return vecFoundSyscalls;
+
+                auto pRuntimeFunctions = reinterpret_cast<PIMAGE_RUNTIME_FUNCTION_ENTRY>(module.m_pModuleBase + uExceptionDirRva);
+                auto uExceptionDirSize = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size;
+                auto uFunctionCount = uExceptionDirSize / sizeof(IMAGE_RUNTIME_FUNCTION_ENTRY);
+
+                auto pFunctionsRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfFunctions);
+                auto pNamesRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNames);
+                auto pOrdinalsRva = reinterpret_cast<uint16_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNameOrdinals);
+
+                std::unordered_map<uint32_t, const char*> mapRvaToName;
+                for (uint32_t i = 0; i < module.m_pExportDir->NumberOfNames; ++i)
+                {
+                    const char* szName = reinterpret_cast<const char*>(module.m_pModuleBase + pNamesRVA[i]);
+                    uint16_t uOrdinal = pOrdinalsRva[i];
+                    uint32_t uFunctionRva = pFunctionsRVA[uOrdinal];
+                    mapRvaToName[uFunctionRva] = szName;
+                }
+
+                uint32_t uSyscallNumber = 0;
+                for (DWORD i = 0; i < uFunctionCount; ++i)
+                {
+                    auto pFunction = &pRuntimeFunctions[i];
+                    if (pFunction->BeginAddress == 0)
+                        break;
+
+                    auto it = mapRvaToName.find(pFunction->BeginAddress);
+                    if (it != mapRvaToName.end())
+                    {
+                        const char* szName = it->second;
+
+                        if (hashing::calculateHashRuntime(szName, 2) == hashing::calculateHash("Zw"))
+                        {
+                            char szNtName[128];
+                            crt::string::copy(szNtName, 128, szName);
+                            szNtName[0] = 'N';
+                            szNtName[1] = 't';
+
+                            const SyscallKey_t key = SYSCALL_ID_RT(szNtName);
+
+                            vecFoundSyscalls.push_back(SyscallEntry_t{
+                                        key,
+                                        uSyscallNumber,
+                                        0
+                                });
+                            uSyscallNumber++;
+                        }
+                    }
+                }
+
+                return vecFoundSyscalls;
+            }
+        };
+
+        struct SignatureScanningParser
+        {
+            static std::vector<SyscallEntry_t> parse(const ModuleInfo_t& module)
+            {
+                std::vector<SyscallEntry_t> vecFoundSyscalls;
+
+                auto pFunctionsRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfFunctions);
+                auto pNamesRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNames);
+                auto pOrdinalsRva = reinterpret_cast<uint16_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNameOrdinals);
+
+                for (uint32_t i = 0; i < module.m_pExportDir->NumberOfNames; i++)
+                {
+                    const char* szName = reinterpret_cast<const char*>(module.m_pModuleBase + pNamesRVA[i]);
+
+                    if (hashing::calculateHashRuntime(szName, 2) != hashing::calculateHash("Nt"))
+                        continue;
+
+                    uint16_t uOrdinal = pOrdinalsRva[i];
+                    uint32_t uFunctionRva = pFunctionsRVA[uOrdinal];
+
+                    auto pExportSectionStart = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+                    auto pExportSectionEnd = pExportSectionStart + module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
+                    if (uFunctionRva >= pExportSectionStart && uFunctionRva < pExportSectionEnd)
+                        continue;
+
+                    uint8_t* pFunctionStart = module.m_pModuleBase + uFunctionRva;
+                    uint32_t uSyscallNumber = 0;
+
+                    bool bIsHooked = false;
+
+                    // @note / SapDragon: 0xB8D18B4C disasm
+                    // mov r10, rcx; mov eax, syscall_number
+                    // mov r10, rcx
+                    // mov eax, imm32
+                    if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C)
+                        uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 4);
+                    else if (isFunctionHooked(pFunctionStart))
+                        bIsHooked = true;
+
+                    if (bIsHooked)
+                    {
+                        // @note / SapDragon: search up
+                        for (int j = 1; j < 20; ++j)
+                        {
+                            uint8_t* pNeighborFunc = pFunctionStart - (j * 0x20);
+                            if (reinterpret_cast<uintptr_t>(pNeighborFunc) < reinterpret_cast<uintptr_t>(module.m_pModuleBase)) break;
+                            if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C)
+                            {
+                                uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
+                                uSyscallNumber = uNeighborSyscall + j;
+                                break;
+                            }
+                        }
+
+                        // @note / SapDragon: search down
+                        if (!uSyscallNumber)
+                        {
+                            for (int j = 1; j < 20; ++j)
+                            {
+                                uint8_t* pNeighborFunc = pFunctionStart + (j * 0x20);
+                                if (reinterpret_cast<uintptr_t>(pNeighborFunc) > (reinterpret_cast<uintptr_t>(module.m_pModuleBase) + module.m_pNtHeaders->OptionalHeader.SizeOfImage)) break;
+                                if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C)
+                                {
+                                    uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
+                                    uSyscallNumber = uNeighborSyscall - j;
+                                    break;
+                                }
+                            }
+                        }
+                    }
+
+                    if (uSyscallNumber)
+                    {
+                        const SyscallKey_t key = SYSCALL_ID_RT(szName);
+                        vecFoundSyscalls.push_back(SyscallEntry_t{
+                                    key,
+                                    uSyscallNumber,
+                                    0
+                            });
+                    }
+                }
+                return vecFoundSyscalls;
+            }
+
+        private:
+            static bool isFunctionHooked(const uint8_t* pFunctionStart)
+            {
+                const uint8_t* pCurrent = pFunctionStart;
+
+                while (*pCurrent == 0x90)
+                    pCurrent++;
+
+                switch (pCurrent[0])
+                {
+                    // @note / SapDragon: JMP rel32
+                case 0xE9:
+                    // @note / SapDragon: JMP rel8
+                case 0xEB:
+                    // @note / SapDragon: push imm32
+                case 0x68:
+                    return true;
+                    // @note / SapDragon: jmp [mem] / jmp [rip + offset]
+                case 0xFF:
+                    if (pCurrent[1] == 0x25)
+                        return true;
+                    break;
+
+                    // @note / SapDragon: int3...
+                case 0xCC:
+                    return true;
+
+                default:
+                    break;
+                }
+
+                return false;
+            }
+        };
     }
+
 
     template<typename T>
     concept IsIAllocationPolicy = requires(size_t uSize, const std::vector<uint8_t>&vecBuffer, void*& pRegion, HANDLE & hObject)
@@ -300,29 +503,25 @@ namespace syscall
         { T::generate(pBuffer, uSyscallNumber, pGadget) } -> std::same_as<void>;
     };
 
-#ifdef SYSCALLS_NO_HASH
-    using SyscallKey_t = std::string;
-#else
-    using SyscallKey_t = hashing::Hash_t;
-#endif
-
-    struct SyscallEntry_t
+    template<typename T>
+    concept IsSyscallParsingPolicy = requires(const ModuleInfo_t & module)
     {
-        SyscallKey_t m_key;
-        uint32_t m_uSyscallNumber;
-        uint32_t m_uOffset;
+        { T::parse(module) } -> std::convertible_to<std::vector<SyscallEntry_t>>;
     };
 
-    struct ModuleInfo_t
+    template<IsSyscallParsingPolicy... IParsers>
+    struct ParserChain_t
     {
-        uint8_t* m_pModuleBase = nullptr;
-        IMAGE_NT_HEADERS* m_pNtHeaders = nullptr;
-        IMAGE_EXPORT_DIRECTORY* m_pExportDir = nullptr;
+        static_assert(sizeof...(IParsers) > 0, "Parsedchain_t cannot be empty.");
     };
 
-
-    template<IsIAllocationPolicy IAllocationPolicy, IsStubGenerationPolicy IStubGenerationPolicy>
-    class Manager
+    template<
+        IsIAllocationPolicy IAllocationPolicy,
+        IsStubGenerationPolicy IStubGenerationPolicy,
+        IsSyscallParsingPolicy IFirstParser,
+        IsSyscallParsingPolicy... IFallbackParsers
+    >
+    class ManagerImpl
     {
     private:
         std::mutex m_mutex;
@@ -334,8 +533,8 @@ namespace syscall
         HANDLE m_hObjectHandle = nullptr;
         void* m_pVehHandle = nullptr;
     public:
-        Manager() = default;
-        ~Manager()
+        ManagerImpl() = default;
+        ~ManagerImpl()
         {
             if (m_pVehHandle)
                 RemoveVectoredExceptionHandler(m_pVehHandle);
@@ -343,9 +542,9 @@ namespace syscall
             IAllocationPolicy::release(m_pSyscallRegion, m_hObjectHandle);
         }
 
-        Manager(const Manager&) = delete;
-        Manager& operator=(const Manager&) = delete;
-        Manager(Manager&& other) noexcept
+        ManagerImpl(const ManagerImpl&) = delete;
+        ManagerImpl& operator=(const ManagerImpl&) = delete;
+        ManagerImpl(ManagerImpl&& other) noexcept
         {
             std::lock_guard<std::mutex> lock(other.m_mutex);
             m_vecParsedSyscalls = std::move(other.m_vecParsedSyscalls);
@@ -358,7 +557,7 @@ namespace syscall
             other.m_hObjectHandle = nullptr;
         }
 
-        Manager& operator=(Manager&& other) noexcept
+        ManagerImpl& operator=(ManagerImpl&& other) noexcept
         {
             if (this != &other)
             {
@@ -377,7 +576,7 @@ namespace syscall
             return *this;
         }
 
-        bool initialize(const std::vector<SyscallKey_t>& vecModuleKeys = {SYSCALL_ID("ntdll.dll")})
+        bool initialize(const std::vector<SyscallKey_t>& vecModuleKeys = { SYSCALL_ID("ntdll.dll") })
         {
             if (m_bInitialized)
                 return true;
@@ -396,12 +595,9 @@ namespace syscall
             {
                 ModuleInfo_t moduleInfo;
                 if (!getModuleInfo(moduleKey, moduleInfo))
-                    continue; 
+                    continue;
 
-                std::vector<SyscallEntry_t> moduleSyscalls = extractSyscallsFromExceptionDir(moduleInfo);
-
-                if (moduleSyscalls.empty())
-                    moduleSyscalls = extractSyscallsByScanning(moduleInfo);
+                std::vector<SyscallEntry_t> moduleSyscalls = tryParseSyscalls<IFirstParser, IFallbackParsers...>(moduleInfo);
 
                 m_vecParsedSyscalls.insert(m_vecParsedSyscalls.end(), moduleSyscalls.begin(), moduleSyscalls.end());
             }
@@ -486,6 +682,21 @@ namespace syscall
             }
         }
     private:
+        template<IsSyscallParsingPolicy CurrentParser, IsSyscallParsingPolicy... OtherParsers>
+        std::vector<SyscallEntry_t> tryParseSyscalls(const ModuleInfo_t& moduleInfo)
+        {
+            auto vecSyscalls = CurrentParser::parse(moduleInfo);
+
+            if (!vecSyscalls.empty())
+                return vecSyscalls;
+
+            if constexpr (sizeof...(OtherParsers) > 0)
+                return tryParseSyscalls<OtherParsers...>(moduleInfo);
+
+            return vecSyscalls;
+        }
+
+
         bool createSyscalls()
         {
             if (m_vecParsedSyscalls.empty())
@@ -500,12 +711,12 @@ namespace syscall
 
             const size_t uGadgetsCount = m_vecSyscallGadgets.size();
 
-            for (const SyscallEntry_t& entry : m_vecParsedSyscalls) 
+            for (const SyscallEntry_t& entry : m_vecParsedSyscalls)
             {
                 uint8_t* pStubLocation = vecTempBuffer.data() + entry.m_uOffset;
                 void* pGadgetForStub = nullptr;
 
-                if constexpr (IStubGenerationPolicy::bRequiresGadget) 
+                if constexpr (IStubGenerationPolicy::bRequiresGadget)
                 {
                     const size_t uRandomIndex = native::rdtscp() % uGadgetsCount;
                     pGadgetForStub = m_vecSyscallGadgets[uRandomIndex];
@@ -515,147 +726,6 @@ namespace syscall
             }
 
             return IAllocationPolicy::allocate(m_uRegionSize, vecTempBuffer, m_pSyscallRegion, m_hObjectHandle);
-        }
-
-        std::vector<SyscallEntry_t> extractSyscallsFromExceptionDir(const ModuleInfo_t& module)
-        {
-            std::vector<SyscallEntry_t> vecFoundSyscalls;
-
-            auto uExceptionDirRva = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress;
-            if (!uExceptionDirRva)
-                return vecFoundSyscalls;
-
-            auto pRuntimeFunctions = reinterpret_cast<PIMAGE_RUNTIME_FUNCTION_ENTRY>(module.m_pModuleBase + uExceptionDirRva);
-            auto uExceptionDirSize = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size;
-            auto uFunctionCount = uExceptionDirSize / sizeof(IMAGE_RUNTIME_FUNCTION_ENTRY);
-
-            auto pFunctionsRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfFunctions);
-            auto pNamesRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNames);
-            auto pOrdinalsRva = reinterpret_cast<uint16_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNameOrdinals);
-
-            std::unordered_map<uint32_t, const char*> mapRvaToName;
-            for (uint32_t i = 0; i < module.m_pExportDir->NumberOfNames; ++i)
-            {
-                const char* szName = reinterpret_cast<const char*>(module.m_pModuleBase + pNamesRVA[i]);
-                uint16_t uOrdinal = pOrdinalsRva[i];
-                uint32_t uFunctionRva = pFunctionsRVA[uOrdinal];
-                mapRvaToName[uFunctionRva] = szName;
-            }
-
-            uint32_t uSyscallNumber = 0; 
-            for (DWORD i = 0; i < uFunctionCount; ++i)
-            {
-                auto pFunction = &pRuntimeFunctions[i];
-                if (pFunction->BeginAddress == 0)
-                    break; 
-
-                auto it = mapRvaToName.find(pFunction->BeginAddress);
-                if (it != mapRvaToName.end())
-                {
-                    const char* szName = it->second;
-
-                    if (hashing::calculateHashRuntime(szName, 2) == hashing::calculateHash("Zw"))
-                    {
-                        char szNtName[128];
-                        crt::string::copy(szNtName,128, szName);
-                        szNtName[0] = 'N';
-                        szNtName[1] = 't';
-
-                        const SyscallKey_t key = SYSCALL_ID_RT(szNtName);
-
-                        vecFoundSyscalls.push_back(SyscallEntry_t{
-                                    key,
-                                    uSyscallNumber,
-                                    0 
-                            });
-                        uSyscallNumber++;
-                    }
-                }
-            }
-
-            return vecFoundSyscalls;
-        }
-
-        std::vector<SyscallEntry_t> extractSyscallsByScanning(const ModuleInfo_t& module)
-        {
-            std::vector<SyscallEntry_t> vecFoundSyscalls;
-
-            auto pFunctionsRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfFunctions);
-            auto pNamesRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNames);
-            auto pOrdinalsRva = reinterpret_cast<uint16_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNameOrdinals);
-
-            for (uint32_t i = 0; i < module.m_pExportDir->NumberOfNames; i++)
-            {
-                const char* szName = reinterpret_cast<const char*>(module.m_pModuleBase + pNamesRVA[i]);
-
-                if (hashing::calculateHashRuntime(szName, 2) != hashing::calculateHash("Nt"))
-                    continue;
-
-                uint16_t uOrdinal = pOrdinalsRva[i];
-                uint32_t uFunctionRva = pFunctionsRVA[uOrdinal];
-
-                auto pExportSectionStart = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-                auto pExportSectionEnd = pExportSectionStart + module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
-                if (uFunctionRva >= pExportSectionStart && uFunctionRva < pExportSectionEnd)
-                    continue;
-
-                uint8_t* pFunctionStart = module.m_pModuleBase + uFunctionRva;
-                uint32_t uSyscallNumber = 0;
-
-                bool bIsHooked = false;
-
-                // @note / SapDragon: 0xB8D18B4C disasm
-                // mov r10, rcx; mov eax, syscall_number
-                // mov r10, rcx
-                // mov eax, imm32
-                if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C)
-                    uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 4);
-                else if (isFunctionHooked(pFunctionStart))
-                    bIsHooked = true;
-
-                if (bIsHooked)
-                {
-                    // @note / SapDragon: search up
-                    for (int j = 1; j < 20; ++j)
-                    {
-                        uint8_t* pNeighborFunc = pFunctionStart - (j * 0x20);
-                        if (reinterpret_cast<uintptr_t>(pNeighborFunc) < reinterpret_cast<uintptr_t>(module.m_pModuleBase)) break;
-                        if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C)
-                        {
-                            uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
-                            uSyscallNumber = uNeighborSyscall + j;
-                            break;
-                        }
-                    }
-
-                    // @note / SapDragon: search down
-                    if (!uSyscallNumber)
-                    {
-                        for (int j = 1; j < 20; ++j)
-                        {
-                            uint8_t* pNeighborFunc = pFunctionStart + (j * 0x20);
-                            if (reinterpret_cast<uintptr_t>(pNeighborFunc) > (reinterpret_cast<uintptr_t>(module.m_pModuleBase) + module.m_pNtHeaders->OptionalHeader.SizeOfImage)) break;
-                            if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C)
-                            {
-                                uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
-                                uSyscallNumber = uNeighborSyscall - j;
-                                break;
-                            }
-                        }
-                    }
-                }
-
-                if (uSyscallNumber)
-                {
-                    const SyscallKey_t key = SYSCALL_ID_RT(szName);
-                    vecFoundSyscalls.push_back(SyscallEntry_t{
-                                key,
-                                uSyscallNumber,
-                                0
-                        });
-                }
-            }
-            return vecFoundSyscalls;
         }
 
         bool getModuleInfo(SyscallKey_t moduleKey, ModuleInfo_t& info)
@@ -714,40 +784,31 @@ namespace syscall
             return !m_vecSyscallGadgets.empty();
         }
 
-        bool isFunctionHooked(const uint8_t* pFunctionStart) const
-        {
-            const uint8_t* pCurrent = pFunctionStart;
+    };
 
-            while (*pCurrent == 0x90)
-                pCurrent++;
+    using DefaultParserChain = syscall::ParserChain_t<
+        syscall::policies::ExceptionDirectoryParser,
+        syscall::policies::SignatureScanningParser
+    >;
 
-            switch (pCurrent[0])
-            {
-                // @note / SapDragon: JMP rel32
-            case 0xE9:
-                // @note / SapDragon: JMP rel8
-            case 0xEB:
-                // @note / SapDragon: push imm32
-            case 0x68:
-                return true;
-                // @note / SapDragon: jmp [mem] / jmp [rip + offset]
-            case 0xFF:
-                if (pCurrent[1] == 0x25)
-                    return true;
-                break;
+    // @note / sapdragon: fucking templates, is that a legal cpp hack? unpack overloads...
+    template<IsIAllocationPolicy AllocPolicy, IsStubGenerationPolicy StubPolicy, typename... ParserArgs>
+    class Manager : public Manager<AllocPolicy, StubPolicy, DefaultParserChain>
+    {
+    };
 
-                // @note / SapDragon: int3...
-            case 0xCC:
-                return true;
+    template< IsIAllocationPolicy AllocPolicy, IsStubGenerationPolicy StubPolicy, IsSyscallParsingPolicy... ParsersInChain >
+    class Manager<AllocPolicy, StubPolicy, ParserChain_t<ParsersInChain...>> : public ManagerImpl<AllocPolicy, StubPolicy, ParsersInChain...>
+    {
+    };
 
-            default:
-                break;
-            }
 
-            return false;
-        }
+    template< IsIAllocationPolicy AllocPolicy, IsStubGenerationPolicy StubPolicy, IsSyscallParsingPolicy FirstParser, IsSyscallParsingPolicy... FallbackParsers>
+    class Manager<AllocPolicy, StubPolicy, FirstParser, FallbackParsers...> : public ManagerImpl<AllocPolicy, StubPolicy, FirstParser, FallbackParsers...>
+    {
     };
 }
+
 
 using SyscallSectionGadget = syscall::Manager<syscall::policies::SectionAllocator, syscall::policies::GadgetStubGenerator>;
 using SyscallHeapGadget = syscall::Manager<syscall::policies::HeapAllocator, syscall::policies::GadgetStubGenerator>;

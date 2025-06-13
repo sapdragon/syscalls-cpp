@@ -21,7 +21,7 @@
 namespace syscall
 {
 
-    thread_local struct ExceptionContext_t 
+    thread_local struct ExceptionContext_t
     {
         bool m_bShouldHandle = false;
         const void* m_pExpectedExceptionAddress = nullptr;
@@ -75,7 +75,7 @@ namespace syscall
         {
             static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/)
             {
-                HMODULE hNtDll = native::getModuleBase(SYSCALL_ID("ntdll.dll"));
+                HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
 
                 auto fNtCreateSection = reinterpret_cast<NtCreateSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtCreateSection")));
                 auto fNtMapView = reinterpret_cast<NtMapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtMapViewOfSection")));
@@ -110,7 +110,7 @@ namespace syscall
             }
             static void release(void* pRegion, HANDLE /*hHeapHandle*/)
             {
-                HMODULE hNtDll = native::getModuleBase(SYSCALL_ID("ntdll.dll"));
+                HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
                 if (pRegion)
                 {
                     auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtUnmapViewOfSection")));
@@ -124,7 +124,7 @@ namespace syscall
         {
             static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& hOutHeapHandle)
             {
-                HMODULE hNtdll = native::getModuleBase(SYSCALL_ID("ntdll.dll"));
+                HMODULE hNtdll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
                 if (!hNtdll)
                     return false;
 
@@ -154,7 +154,7 @@ namespace syscall
             {
                 if (hHeapHandle)
                 {
-                    HMODULE hNtdll = native::getModuleBase(SYSCALL_ID("ntdll.dll"));
+                    HMODULE hNtdll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
                     if (!hNtdll)
                         return;
 
@@ -169,7 +169,7 @@ namespace syscall
         {
             static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/)
             {
-                HMODULE hNtDll = native::getModuleBase(SYSCALL_ID("ntdll.dll"));
+                HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
 
                 auto fNtAllocate = reinterpret_cast<NtAllocateVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtAllocateVirtualMemory")));
                 auto fNtProtect = reinterpret_cast<NtProtectVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtProtectVirtualMemory")));
@@ -202,7 +202,7 @@ namespace syscall
 
             static void release(void* pRegion, HANDLE /*heapHandle*/)
             {
-                HMODULE hNtDll = native::getModuleBase(SYSCALL_ID("ntdll.dll"));
+                HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
 
                 if (pRegion)
                 {
@@ -311,6 +311,13 @@ namespace syscall
         uint32_t m_uOffset;
     };
 
+    struct ModuleInfo_t
+    {
+        uint8_t* m_pModuleBase = nullptr;
+        IMAGE_NT_HEADERS* m_pNtHeaders = nullptr;
+        IMAGE_EXPORT_DIRECTORY* m_pExportDir = nullptr;
+    };
+
 
     template<IsIAllocationPolicy IAllocationPolicy, IsStubGenerationPolicy IStubGenerationPolicy>
     class Manager
@@ -368,7 +375,7 @@ namespace syscall
             return *this;
         }
 
-        bool initialize()
+        bool initialize(const std::vector<SyscallKey_t>& vecModuleKeys = {SYSCALL_ID("ntdll.dll"), SYSCALL_ID("win32u.dll")})
         {
             if (m_bInitialized)
                 return true;
@@ -382,26 +389,39 @@ namespace syscall
                 if (!findSyscallGadget())
                     return false;
 
-            if (!extractSyscallsFromExceptionDir())
+            m_vecParsedSyscalls.clear();
+            for (const auto& moduleKey : vecModuleKeys)
             {
-                // @note / SapDragon: fallback if the primary one fails
-                m_vecParsedSyscalls.clear();
-                if (!extractSyscallsByScanning())
-                    return false;
+                ModuleInfo_t moduleInfo;
+                if (!getModuleInfo(moduleKey, moduleInfo))
+                    continue; 
+
+                std::vector<SyscallEntry_t> moduleSyscalls = extractSyscallsFromExceptionDir(moduleInfo);
+
+                if (moduleSyscalls.empty())
+                    moduleSyscalls = extractSyscallsByScanning(moduleInfo);
+
+                m_vecParsedSyscalls.insert(m_vecParsedSyscalls.end(), moduleSyscalls.begin(), moduleSyscalls.end());
             }
+
+            if (m_vecParsedSyscalls.empty())
+                return false;
 
             std::sort(m_vecParsedSyscalls.begin(), m_vecParsedSyscalls.end(),
                 [](const SyscallEntry_t& a, const SyscallEntry_t& b) {
                     return a.m_key < b.m_key;
                 });
 
+            for (size_t i = 0; i < m_vecParsedSyscalls.size(); ++i)
+                m_vecParsedSyscalls[i].m_uOffset = static_cast<uint32_t>(i * IStubGenerationPolicy::getStubSize());
+
             m_bInitialized = createSyscalls();
-            if (m_bInitialized) 
+            if (m_bInitialized)
             {
-                if constexpr (std::is_same_v<IStubGenerationPolicy, policies::ExceptionStubGenerator>) 
+                if constexpr (std::is_same_v<IStubGenerationPolicy, policies::ExceptionStubGenerator>)
                 {
                     m_pVehHandle = AddVectoredExceptionHandler(1, VectoredExceptionHandler);
-                    if (!m_pVehHandle) 
+                    if (!m_pVehHandle)
                     {
                         IAllocationPolicy::release(m_pSyscallRegion, m_hObjectHandle);
                         m_pSyscallRegion = nullptr;
@@ -449,7 +469,7 @@ namespace syscall
             }
             else
                 return reinterpret_cast<Function_t>(pStubAddress)(std::forward<Args>(args)...);
-            
+
         }
     private:
         bool createSyscalls()
@@ -481,7 +501,7 @@ namespace syscall
 
         static bool getNtdll(NtdllInfo_t& info)
         {
-            HMODULE hNtdll = native::getModuleBase(SYSCALL_ID("ntdll.dll"));
+            HMODULE hNtdll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
             if (!hNtdll)
                 return false;
 
@@ -504,96 +524,97 @@ namespace syscall
             return true;
         }
 
-        bool extractSyscallsFromExceptionDir()
+        std::vector<SyscallEntry_t> extractSyscallsFromExceptionDir(const ModuleInfo_t& module)
         {
-            NtdllInfo_t ntdll;
-            if (!getNtdll(ntdll))
-                return false;
+            std::vector<SyscallEntry_t> vecFoundSyscalls;
 
-            auto uExceptionDirRva = ntdll.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress;
+            auto uExceptionDirRva = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress;
             if (!uExceptionDirRva)
-                return false;
+                return vecFoundSyscalls;
 
-            auto pRuntimeFunctions = reinterpret_cast<PIMAGE_RUNTIME_FUNCTION_ENTRY>(ntdll.m_pNtdllBase + uExceptionDirRva);
-            auto uExceptionDirSize = ntdll.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size;
+            auto pRuntimeFunctions = reinterpret_cast<PIMAGE_RUNTIME_FUNCTION_ENTRY>(module.m_pModuleBase + uExceptionDirRva);
+            auto uExceptionDirSize = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size;
             auto uFunctionCount = uExceptionDirSize / sizeof(IMAGE_RUNTIME_FUNCTION_ENTRY);
 
-            auto pFunctionsRVA = reinterpret_cast<uint32_t*>(ntdll.m_pNtdllBase + ntdll.m_pExportDir->AddressOfFunctions);
-            auto pNamesRVA = reinterpret_cast<uint32_t*>(ntdll.m_pNtdllBase + ntdll.m_pExportDir->AddressOfNames);
-            auto pOrdinalsRva = reinterpret_cast<uint16_t*>(ntdll.m_pNtdllBase + ntdll.m_pExportDir->AddressOfNameOrdinals);
+            auto pFunctionsRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfFunctions);
+            auto pNamesRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNames);
+            auto pOrdinalsRva = reinterpret_cast<uint16_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNameOrdinals);
 
             std::unordered_map<uint32_t, const char*> mapRvaToName;
-            for (uint32_t iCurrentNameIndex = 0; iCurrentNameIndex < ntdll.m_pExportDir->NumberOfNames; ++iCurrentNameIndex)
+            for (uint32_t i = 0; i < module.m_pExportDir->NumberOfNames; ++i)
             {
-                const char* szName = reinterpret_cast<const char*>(ntdll.m_pNtdllBase + pNamesRVA[iCurrentNameIndex]);
-                uint16_t uOrdinal = pOrdinalsRva[iCurrentNameIndex];
+                const char* szName = reinterpret_cast<const char*>(module.m_pModuleBase + pNamesRVA[i]);
+                uint16_t uOrdinal = pOrdinalsRva[i];
                 uint32_t uFunctionRva = pFunctionsRVA[uOrdinal];
                 mapRvaToName[uFunctionRva] = szName;
             }
 
-            uint32_t uSyscallNumber = 0;
-            for (DWORD iCurrentFunctionIndex = 0; iCurrentFunctionIndex < uFunctionCount; ++iCurrentFunctionIndex)
+            uint32_t uSyscallNumber = 0; 
+            for (DWORD i = 0; i < uFunctionCount; ++i)
             {
-                auto pFunction = &pRuntimeFunctions[iCurrentFunctionIndex];
+                auto pFunction = &pRuntimeFunctions[i];
                 if (pFunction->BeginAddress == 0)
-                    break;
+                    break; 
 
                 auto it = mapRvaToName.find(pFunction->BeginAddress);
                 if (it != mapRvaToName.end())
                 {
-
                     const char* szName = it->second;
+
                     if (hashing::calculateHashRuntime(szName, 2) == hashing::calculateHash("Zw"))
                     {
                         char szNtName[128];
-                        strcpy_s(szNtName, szName);
+                        crt::string::copy(szNtName,128, szName);
                         szNtName[0] = 'N';
                         szNtName[1] = 't';
 
                         const SyscallKey_t key = SYSCALL_ID_RT(szNtName);
 
-                        m_vecParsedSyscalls.push_back(SyscallEntry_t{
+                        vecFoundSyscalls.push_back(SyscallEntry_t{
                                     key,
                                     uSyscallNumber,
-                                    static_cast<uint32_t>((m_vecParsedSyscalls.size() * IStubGenerationPolicy::getStubSize()))
+                                    0 
                             });
                         uSyscallNumber++;
                     }
                 }
             }
 
-            return !m_vecParsedSyscalls.empty();
+            return vecFoundSyscalls;
         }
 
-        bool extractSyscallsByScanning()
+        std::vector<SyscallEntry_t> extractSyscallsByScanning(const ModuleInfo_t& module)
         {
-            NtdllInfo_t ntdll;
-            if (!getNtdll(ntdll))
-                return false;
+            std::vector<SyscallEntry_t> vecFoundSyscalls;
 
-            auto pFunctionsRVA = reinterpret_cast<uint32_t*>(ntdll.m_pNtdllBase + ntdll.m_pExportDir->AddressOfFunctions);
-            auto pNamesRVA = reinterpret_cast<uint32_t*>(ntdll.m_pNtdllBase + ntdll.m_pExportDir->AddressOfNames);
-            auto pOrdinalsRva = reinterpret_cast<uint16_t*>(ntdll.m_pNtdllBase + ntdll.m_pExportDir->AddressOfNameOrdinals);
+            auto pFunctionsRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfFunctions);
+            auto pNamesRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNames);
+            auto pOrdinalsRva = reinterpret_cast<uint16_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNameOrdinals);
 
-            for (uint32_t i = 0; i < ntdll.m_pExportDir->NumberOfNames; i++)
+            for (uint32_t i = 0; i < module.m_pExportDir->NumberOfNames; i++)
             {
-                const char* szName = reinterpret_cast<const char*>(ntdll.m_pNtdllBase + pNamesRVA[i]);
+                const char* szName = reinterpret_cast<const char*>(module.m_pModuleBase + pNamesRVA[i]);
 
                 if (hashing::calculateHashRuntime(szName, 2) != hashing::calculateHash("Nt"))
                     continue;
 
                 uint16_t uOrdinal = pOrdinalsRva[i];
                 uint32_t uFunctionRva = pFunctionsRVA[uOrdinal];
-                auto pExportSectionStart = ntdll.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-                auto pExportSectionEnd = pExportSectionStart + ntdll.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
+
+                auto pExportSectionStart = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+                auto pExportSectionEnd = pExportSectionStart + module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
                 if (uFunctionRva >= pExportSectionStart && uFunctionRva < pExportSectionEnd)
                     continue;
 
-                uint8_t* pFunctionStart = ntdll.m_pNtdllBase + uFunctionRva;
+                uint8_t* pFunctionStart = module.m_pModuleBase + uFunctionRva;
                 uint32_t uSyscallNumber = 0;
 
                 bool bIsHooked = false;
-                // @note / SapDragon: mov r10, rcx; mov eax, syscallNumber
+
+                // @note / SapDragon: 0xB8D18B4C disasm
+                // mov r10, rcx; mov eax, syscall_number
+                // mov r10, rcx
+                // mov eax, imm32
                 if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C)
                     uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 4);
                 else if (isFunctionHooked(pFunctionStart))
@@ -604,11 +625,12 @@ namespace syscall
                     // @note / SapDragon: search up
                     for (int j = 1; j < 20; ++j)
                     {
-                        uint8_t* pNeighborFunc = pFunctionStart + (j * 0x20);
+                        uint8_t* pNeighborFunc = pFunctionStart - (j * 0x20);
+                        if (reinterpret_cast<uintptr_t>(pNeighborFunc) < reinterpret_cast<uintptr_t>(module.m_pModuleBase)) break;
                         if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C)
                         {
                             uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
-                            uSyscallNumber = uNeighborSyscall - j;
+                            uSyscallNumber = uNeighborSyscall + j;
                             break;
                         }
                     }
@@ -618,11 +640,12 @@ namespace syscall
                     {
                         for (int j = 1; j < 20; ++j)
                         {
-                            uint8_t* pNeighborFunc = pFunctionStart - (j * 0x20);
+                            uint8_t* pNeighborFunc = pFunctionStart + (j * 0x20);
+                            if (reinterpret_cast<uintptr_t>(pNeighborFunc) > (reinterpret_cast<uintptr_t>(module.m_pModuleBase) + module.m_pNtHeaders->OptionalHeader.SizeOfImage)) break;
                             if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C)
                             {
                                 uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
-                                uSyscallNumber = uNeighborSyscall + j;
+                                uSyscallNumber = uNeighborSyscall - j;
                                 break;
                             }
                         }
@@ -632,15 +655,41 @@ namespace syscall
                 if (uSyscallNumber)
                 {
                     const SyscallKey_t key = SYSCALL_ID_RT(szName);
-                    m_vecParsedSyscalls.push_back(SyscallEntry_t{
+                    vecFoundSyscalls.push_back(SyscallEntry_t{
                                 key,
                                 uSyscallNumber,
-                                static_cast<uint32_t>((m_vecParsedSyscalls.size() * IStubGenerationPolicy::getStubSize()))
+                                0
                         });
                 }
             }
-            return !m_vecParsedSyscalls.empty();
+            return vecFoundSyscalls;
         }
+
+        bool getModuleInfo(SyscallKey_t moduleKey, ModuleInfo_t& info)
+        {
+            HMODULE hModule = native::getModuleBase(moduleKey);
+            if (!hModule)
+                return false;
+
+            info.m_pModuleBase = reinterpret_cast<uint8_t*>(hModule);
+
+            auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(info.m_pModuleBase);
+            if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+                return false;
+
+            info.m_pNtHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>(info.m_pModuleBase + pDosHeader->e_lfanew);
+            if (info.m_pNtHeaders->Signature != IMAGE_NT_SIGNATURE)
+                return false;
+
+            auto uExportRva = info.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+            if (!uExportRva)
+                return false;
+
+            info.m_pExportDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(info.m_pModuleBase + uExportRva);
+
+            return true;
+        }
+
 
         bool findSyscallGadget()
         {

@@ -630,7 +630,7 @@ namespace syscall
 
             return m_bInitialized;
         }
-        template<typename Ret, typename... Args>
+        template<typename Ret = uintptr_t, typename... Args>
         SYSCALL_FORCE_INLINE Ret invoke(const SyscallKey_t& syscallId, Args... args)
         {
             if (!m_bInitialized)

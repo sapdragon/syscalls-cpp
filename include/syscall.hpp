@@ -158,7 +158,7 @@ namespace syscall
                 if (!fRtlCreateHeap || !fRtlAllocateHeap)
                     return false;
 
-                hOutHeapHandle = fRtlCreateHeap(HEAP_CREATE_ENABLE_EXECUTE, nullptr, 0, 0, nullptr, nullptr);
+                hOutHeapHandle = fRtlCreateHeap(HEAP_CREATE_ENABLE_EXECUTE | HEAP_GROWABLE, nullptr, 0, 0, nullptr, nullptr);
                 if (!hOutHeapHandle)
                     return false;
 

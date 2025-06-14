@@ -14,24 +14,23 @@ You can combine any allocation policy with any stub generation policy.
 
 | Policy             | Method                                                |
 | ------------------ | ----------------------------------------------------- | 
-| `SectionAllocator` | `NtCreateSection` with `SEC_NO_CHANGE` flag           | 
-| `HeapAllocator`    | `HeapCreate` with `HEAP_CREATE_ENABLE_EXECUTE`        |
-| `VirtualMemoryAllocator`    | `NtAllocateVirtualMemory` (`RW` -> `RX`)       |
+| `allocator::section` | `NtCreateSection` with `SEC_NO_CHANGE` flag           | 
+| `allocator::heap`    | `HeapCreate` with `HEAP_CREATE_ENABLE_EXECUTE`        |
+| `allocator::memory`    | `NtAllocateVirtualMemory` (`RW` -> `RX`)       |
 
 #### Stub Generation Policies (`IsStubGenerationPolicy`)
 
 | Policy                | Method                                              |
 | --------------------- | ----------------------------------------------------|
-| `GadgetStubGenerator` | Jumps to a `syscall; ret` gadget found in `ntdll.dll|
-| `DirectStubGenerator` | Uses a classic, self-contained `syscall` instruction|
-| `ExceptionStubGenerator` | Triggers a breakpoint (`ud2`) to perform the syscall via a custom Vectored Exception Handler (VEH). |
-
+| `generator::gadget` | Jumps to a `syscall; ret` gadget found in `ntdll.dll|
+| `generator::direct` | Uses a classic, self-contained `syscall` instruction|
+| `generator::exception` | Triggers a breakpoint (`ud2`) to perform the syscall via a custom Vectored Exception Handler (VEH). |
 
 #### Parsing Policies (`IsSyscallParsingPolicy`)
 | Policy | Method |
 | :--- | :--- |
-| `ExceptionDirectoryParser` | Parses the PE exception directory (`.pdata` section) of the module. This is the most reliable method. |
-| `SignatureScanningParser` | Scans function prologues for the `mov r10, rcx; mov eax, syscall_id` signature with hooks detection. This is a robust fallback. |
+| `parser::exception` | Parses the PE exception directory (`.pdata` section) of the module. This is the most reliable method. |
+| `parser::signature` | Scans function prologues for the `mov r10, rcx; mov eax, syscall_id` signature with hooks detection. |
 
 
 ## Example: Crafting Your Strategy
@@ -79,8 +78,8 @@ For more control, you can specify your own policy or build a custom allocators /
 #include "syscall.hpp"
 
 using UniqueSecretOwnPolicyManager = syscall::Manager<
-        syscall::policies::HeapAllocator, // heap allocator
-        syscall::policies::GadgetStubGenerator // gadget by ntdll
+        syscall::policies::allocator::heap, // heap allocator
+        syscall::policies::generator::gadget, // gadget by ntdll
         DefaultParserChain  // default exception directory + improved halo gates as a fallback is used
 >;
 

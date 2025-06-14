@@ -93,399 +93,404 @@ namespace syscall
 
     namespace policies
     {
-        // @note / sapdragon: move to namespaces ( policies::allocator::section / policies::generator::direct / policies::parser::exceptions etc )
-        struct SectionAllocator
+        namespace allocator
         {
-            static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/)
+            struct secton
             {
-                HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
-
-                auto fNtCreateSection = reinterpret_cast<NtCreateSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtCreateSection")));
-                auto fNtMapView = reinterpret_cast<NtMapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtMapViewOfSection")));
-                auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtUnmapViewOfSection")));
-                auto fNtClose = reinterpret_cast<NtCloseHandle_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtClose")));
-                if (!fNtCreateSection || !fNtMapView || !fNtUnmapView || !fNtClose)
-                    return false;
-
-                HANDLE hSectionHandle = nullptr;
-                LARGE_INTEGER sectionSize;
-                sectionSize.QuadPart = uRegionSize;
-
-                NTSTATUS status = fNtCreateSection(&hSectionHandle, SECTION_ALL_ACCESS, nullptr, &sectionSize, PAGE_EXECUTE_READWRITE, SEC_COMMIT | SEC_NO_CHANGE, nullptr);
-                if (!NT_SUCCESS(status))
-                    return false;
-
-                void* pTempView = nullptr;
-                SIZE_T uViewSize = uRegionSize;
-                status = fNtMapView(hSectionHandle, NtCurrentProcess(), &pTempView, 0, 0, nullptr, &uViewSize, ViewShare, 0, PAGE_READWRITE);
-                if (!NT_SUCCESS(status))
+                static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/)
                 {
-                    fNtClose(hSectionHandle);
-                    return false;
-                }
+                    HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
 
-                crt::memory::copy(pTempView, vecBuffer.data(), uRegionSize);
-                fNtUnmapView(NtCurrentProcess(), pTempView);
-                uViewSize = uRegionSize;
-                status = fNtMapView(hSectionHandle, NtCurrentProcess(), &pOutRegion, 0, 0, nullptr, &uViewSize, ViewShare, 0, PAGE_EXECUTE_READ);
-                fNtClose(hSectionHandle);
-                return NT_SUCCESS(status) && pOutRegion;
-            }
-            static void release(void* pRegion, HANDLE /*hHeapHandle*/)
-            {
-                HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
-                if (pRegion)
-                {
+                    auto fNtCreateSection = reinterpret_cast<NtCreateSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtCreateSection")));
+                    auto fNtMapView = reinterpret_cast<NtMapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtMapViewOfSection")));
                     auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtUnmapViewOfSection")));
-                    if (fNtUnmapView)
-                        fNtUnmapView(NtCurrentProcess(), pRegion);
-                }
-            }
-        };
+                    auto fNtClose = reinterpret_cast<NtCloseHandle_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtClose")));
+                    if (!fNtCreateSection || !fNtMapView || !fNtUnmapView || !fNtClose)
+                        return false;
 
-        struct HeapAllocator
-        {
-            static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& hOutHeapHandle)
-            {
-                using RtlGetLastNtStatus_t = NTSTATUS(NTAPI*)();
-                HMODULE hNtdll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
-                if (!hNtdll)
-                    return false;
+                    HANDLE hSectionHandle = nullptr;
+                    LARGE_INTEGER sectionSize;
+                    sectionSize.QuadPart = uRegionSize;
 
-                auto fRtlCreateHeap = reinterpret_cast<RtlCreateHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlCreateHeap")));
-                auto fRtlAllocateHeap = reinterpret_cast<RtlAllocateHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlAllocateHeap")));
-                auto fRtlGetLastNtStatus = reinterpret_cast<RtlGetLastNtStatus_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlGetLastNtStatus")));
-                if (!fRtlCreateHeap || !fRtlAllocateHeap)
-                    return false;
+                    NTSTATUS status = fNtCreateSection(&hSectionHandle, SECTION_ALL_ACCESS, nullptr, &sectionSize, PAGE_EXECUTE_READWRITE, SEC_COMMIT | SEC_NO_CHANGE, nullptr);
+                    if (!NT_SUCCESS(status))
+                        return false;
 
-                hOutHeapHandle = fRtlCreateHeap(HEAP_CREATE_ENABLE_EXECUTE | HEAP_GROWABLE, nullptr, 0, 0, nullptr, nullptr);
-                if (!hOutHeapHandle)
-                    return false;
-
-                pOutRegion = fRtlAllocateHeap(hOutHeapHandle, 0, uRegionSize);
-                if (!pOutRegion)
-                {
-                    release(nullptr, hOutHeapHandle);
-                    hOutHeapHandle = nullptr;
-                    return false;
-                }
-
-                crt::memory::copy(pOutRegion, vecBuffer.data(), uRegionSize);
-                return true;
-            }
-
-            static void release(void* /*region*/, HANDLE hHeapHandle)
-            {
-                if (hHeapHandle)
-                {
-                    HMODULE hNtdll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
-                    if (!hNtdll)
-                        return;
-
-                    auto fRtlDestroyHeap = reinterpret_cast<RtlDestroyHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlDestroyHeap")));
-                    if (fRtlDestroyHeap)
-                        fRtlDestroyHeap(hHeapHandle);
-                }
-            }
-        };
-
-        struct VirtualMemoryAllocator
-        {
-            static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/)
-            {
-                HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
-
-                auto fNtAllocate = reinterpret_cast<NtAllocateVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtAllocateVirtualMemory")));
-                auto fNtProtect = reinterpret_cast<NtProtectVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtProtectVirtualMemory")));
-                if (!fNtAllocate || !fNtProtect)
-                    return false;
-
-                pOutRegion = nullptr;
-                SIZE_T uSize = uRegionSize;
-                NTSTATUS status = fNtAllocate(NtCurrentProcess(), &pOutRegion, 0, &uSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
-
-                if (!NT_SUCCESS(status) || !pOutRegion)
-                    return false;
-
-                crt::memory::copy(pOutRegion, vecBuffer.data(), uRegionSize);
-
-                ULONG oldProtection = 0;
-                uSize = uRegionSize;
-                status = fNtProtect(NtCurrentProcess(), &pOutRegion, &uSize, PAGE_EXECUTE_READ, &oldProtection);
-
-                if (!NT_SUCCESS(status))
-                {
-                    uSize = 0;
-                    fNtAllocate(NtCurrentProcess(), &pOutRegion, 0, &uSize, MEM_RELEASE, 0);
-                    pOutRegion = nullptr;
-                    return false;
-                }
-
-                return true;
-            }
-
-            static void release(void* pRegion, HANDLE /*heapHandle*/)
-            {
-                HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
-
-                if (pRegion)
-                {
-                    auto fNtFree = reinterpret_cast<NtFreeVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtFreeVirtualMemory")));
-                    if (fNtFree)
+                    void* pTempView = nullptr;
+                    SIZE_T uViewSize = uRegionSize;
+                    status = fNtMapView(hSectionHandle, NtCurrentProcess(), &pTempView, 0, 0, nullptr, &uViewSize, ViewShare, 0, PAGE_READWRITE);
+                    if (!NT_SUCCESS(status))
                     {
-                        SIZE_T uSize = 0;
-                        fNtFree(NtCurrentProcess(), &pRegion, &uSize, MEM_RELEASE);
+                        fNtClose(hSectionHandle);
+                        return false;
+                    }
+
+                    crt::memory::copy(pTempView, vecBuffer.data(), uRegionSize);
+                    fNtUnmapView(NtCurrentProcess(), pTempView);
+                    uViewSize = uRegionSize;
+                    status = fNtMapView(hSectionHandle, NtCurrentProcess(), &pOutRegion, 0, 0, nullptr, &uViewSize, ViewShare, 0, PAGE_EXECUTE_READ);
+                    fNtClose(hSectionHandle);
+                    return NT_SUCCESS(status) && pOutRegion;
+                }
+                static void release(void* pRegion, HANDLE /*hHeapHandle*/)
+                {
+                    HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
+                    if (pRegion)
+                    {
+                        auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtUnmapViewOfSection")));
+                        if (fNtUnmapView)
+                            fNtUnmapView(NtCurrentProcess(), pRegion);
                     }
                 }
-            }
-        };
-
-        struct GadgetStubGenerator
-        {
-            static constexpr bool bRequiresGadget = true;
-            static constexpr size_t getStubSize() { return 32; }
-            static void generate(uint8_t* pBuffer, uint32_t uSyscallNumber, void* pGadgetAddress)
-            {
-                // @note / SapDragon: mov r10, rcx
-                pBuffer[0] = 0x49;
-                pBuffer[1] = 0x89;
-                pBuffer[2] = 0xCA;
-
-                // @note / SapDragon: mov eax, syscallNumber
-                pBuffer[3] = 0xB8;
-                *reinterpret_cast<uint32_t*>(&pBuffer[4]) = uSyscallNumber;
-
-                // @note / SapDragon: mov r11, gadgetAddress
-                pBuffer[8] = 0x49;
-                pBuffer[9] = 0xBB;
-                *reinterpret_cast<uint64_t*>(&pBuffer[10]) = reinterpret_cast<uint64_t>(pGadgetAddress);
-
-                // @note / SapDragon: push r11
-                pBuffer[18] = 0x41;
-                pBuffer[19] = 0x53;
-
-                // @note / SapDragon: ret
-                pBuffer[20] = 0xC3;
-            }
-        };
-
-        struct DirectStubGenerator
-        {
-            static constexpr bool bRequiresGadget = false;
-
-            inline static constexpr std::array<uint8_t, 18> arrShellcode =
-            {
-                0x51,                               // push rcx
-                0x41, 0x5A,                         // pop r10
-                0xB8, 0x00, 0x00, 0x00, 0x00,       // mov eax, 0x00000000 (syscall number placeholder)
-                0x0F, 0x05,                         // syscall
-                0x48, 0x83, 0xC4, 0x08,             // add rsp, 8
-                0xFF, 0x64, 0x24, 0xF8              // jmp qword ptr [rsp-8]
             };
 
-            static constexpr size_t getStubSize() { return arrShellcode.size(); }
-
-            static void generate(uint8_t* pBuffer, uint32_t uSyscallNumber, void* /*pGadgetAddress*/)
+            struct heap
             {
-                crt::memory::copy(pBuffer, arrShellcode.data(), arrShellcode.size());
-                *reinterpret_cast<uint32_t*>(pBuffer + 4) = uSyscallNumber;
-            }
-        };
-
-        struct ExceptionStubGenerator
-        {
-            static constexpr bool bRequiresGadget = true;
-            static constexpr size_t getStubSize() { return 8; }
-            static void generate(uint8_t* pBuffer, uint32_t /*uSyscallNumber*/, void* /*pGadgetAddress*/)
-            {
-                pBuffer[0] = 0x0F;
-                pBuffer[1] = 0x0B;
-                pBuffer[2] = 0xC3;
-                crt::memory::set(pBuffer + 2, 0x90, getStubSize() - 3);
-            }
-        };
-
-        struct ExceptionDirectoryParser
-        {
-            static std::vector<SyscallEntry_t> parse(const ModuleInfo_t& module)
-            {
-                std::vector<SyscallEntry_t> vecFoundSyscalls;
-
-                auto uExceptionDirRva = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress;
-                if (!uExceptionDirRva)
-                    return vecFoundSyscalls;
-
-                auto pRuntimeFunctions = reinterpret_cast<PIMAGE_RUNTIME_FUNCTION_ENTRY>(module.m_pModuleBase + uExceptionDirRva);
-                auto uExceptionDirSize = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size;
-                auto uFunctionCount = uExceptionDirSize / sizeof(IMAGE_RUNTIME_FUNCTION_ENTRY);
-
-                auto pFunctionsRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfFunctions);
-                auto pNamesRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNames);
-                auto pOrdinalsRva = reinterpret_cast<uint16_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNameOrdinals);
-
-                std::unordered_map<uint32_t, const char*> mapRvaToName;
-                for (uint32_t i = 0; i < module.m_pExportDir->NumberOfNames; ++i)
+                static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& hOutHeapHandle)
                 {
-                    const char* szName = reinterpret_cast<const char*>(module.m_pModuleBase + pNamesRVA[i]);
-                    uint16_t uOrdinal = pOrdinalsRva[i];
-                    uint32_t uFunctionRva = pFunctionsRVA[uOrdinal];
-                    mapRvaToName[uFunctionRva] = szName;
+                    using RtlGetLastNtStatus_t = NTSTATUS(NTAPI*)();
+                    HMODULE hNtdll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
+                    if (!hNtdll)
+                        return false;
+
+                    auto fRtlCreateHeap = reinterpret_cast<RtlCreateHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlCreateHeap")));
+                    auto fRtlAllocateHeap = reinterpret_cast<RtlAllocateHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlAllocateHeap")));
+                    auto fRtlGetLastNtStatus = reinterpret_cast<RtlGetLastNtStatus_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlGetLastNtStatus")));
+                    if (!fRtlCreateHeap || !fRtlAllocateHeap)
+                        return false;
+
+                    hOutHeapHandle = fRtlCreateHeap(HEAP_CREATE_ENABLE_EXECUTE | HEAP_GROWABLE, nullptr, 0, 0, nullptr, nullptr);
+                    if (!hOutHeapHandle)
+                        return false;
+
+                    pOutRegion = fRtlAllocateHeap(hOutHeapHandle, 0, uRegionSize);
+                    if (!pOutRegion)
+                    {
+                        release(nullptr, hOutHeapHandle);
+                        hOutHeapHandle = nullptr;
+                        return false;
+                    }
+
+                    crt::memory::copy(pOutRegion, vecBuffer.data(), uRegionSize);
+                    return true;
                 }
 
-                uint32_t uSyscallNumber = 0;
-                for (DWORD i = 0; i < uFunctionCount; ++i)
+                static void release(void* /*region*/, HANDLE hHeapHandle)
                 {
-                    auto pFunction = &pRuntimeFunctions[i];
-                    if (pFunction->BeginAddress == 0)
-                        break;
-
-                    auto it = mapRvaToName.find(pFunction->BeginAddress);
-                    if (it != mapRvaToName.end())
+                    if (hHeapHandle)
                     {
-                        const char* szName = it->second;
+                        HMODULE hNtdll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
+                        if (!hNtdll)
+                            return;
 
-                        if (hashing::calculateHashRuntime(szName, 2) == hashing::calculateHash("Zw"))
+                        auto fRtlDestroyHeap = reinterpret_cast<RtlDestroyHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlDestroyHeap")));
+                        if (fRtlDestroyHeap)
+                            fRtlDestroyHeap(hHeapHandle);
+                    }
+                }
+            };
+
+            struct memory
+            {
+                static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/)
+                {
+                    HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
+
+                    auto fNtAllocate = reinterpret_cast<NtAllocateVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtAllocateVirtualMemory")));
+                    auto fNtProtect = reinterpret_cast<NtProtectVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtProtectVirtualMemory")));
+                    if (!fNtAllocate || !fNtProtect)
+                        return false;
+
+                    pOutRegion = nullptr;
+                    SIZE_T uSize = uRegionSize;
+                    NTSTATUS status = fNtAllocate(NtCurrentProcess(), &pOutRegion, 0, &uSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+
+                    if (!NT_SUCCESS(status) || !pOutRegion)
+                        return false;
+
+                    crt::memory::copy(pOutRegion, vecBuffer.data(), uRegionSize);
+
+                    ULONG oldProtection = 0;
+                    uSize = uRegionSize;
+                    status = fNtProtect(NtCurrentProcess(), &pOutRegion, &uSize, PAGE_EXECUTE_READ, &oldProtection);
+
+                    if (!NT_SUCCESS(status))
+                    {
+                        uSize = 0;
+                        fNtAllocate(NtCurrentProcess(), &pOutRegion, 0, &uSize, MEM_RELEASE, 0);
+                        pOutRegion = nullptr;
+                        return false;
+                    }
+
+                    return true;
+                }
+
+                static void release(void* pRegion, HANDLE /*heapHandle*/)
+                {
+                    HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
+
+                    if (pRegion)
+                    {
+                        auto fNtFree = reinterpret_cast<NtFreeVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtFreeVirtualMemory")));
+                        if (fNtFree)
                         {
-                            char szNtName[128];
-                            crt::string::copy(szNtName, 128, szName);
-                            szNtName[0] = 'N';
-                            szNtName[1] = 't';
+                            SIZE_T uSize = 0;
+                            fNtFree(NtCurrentProcess(), &pRegion, &uSize, MEM_RELEASE);
+                        }
+                    }
+                }
+            };
+        } // allocator
+        namespace generator
+        {
+            struct gadget
+            {
+                static constexpr bool bRequiresGadget = true;
+                static constexpr size_t getStubSize() { return 32; }
+                static void generate(uint8_t* pBuffer, uint32_t uSyscallNumber, void* pGadgetAddress)
+                {
+                    // @note / SapDragon: mov r10, rcx
+                    pBuffer[0] = 0x49;
+                    pBuffer[1] = 0x89;
+                    pBuffer[2] = 0xCA;
 
-                            const SyscallKey_t key = SYSCALL_ID_RT(szNtName);
+                    // @note / SapDragon: mov eax, syscallNumber
+                    pBuffer[3] = 0xB8;
+                    *reinterpret_cast<uint32_t*>(&pBuffer[4]) = uSyscallNumber;
 
+                    // @note / SapDragon: mov r11, gadgetAddress
+                    pBuffer[8] = 0x49;
+                    pBuffer[9] = 0xBB;
+                    *reinterpret_cast<uint64_t*>(&pBuffer[10]) = reinterpret_cast<uint64_t>(pGadgetAddress);
+
+                    // @note / SapDragon: push r11
+                    pBuffer[18] = 0x41;
+                    pBuffer[19] = 0x53;
+
+                    // @note / SapDragon: ret
+                    pBuffer[20] = 0xC3;
+                }
+            };
+
+            struct direct
+            {
+                static constexpr bool bRequiresGadget = false;
+
+                inline static constexpr std::array<uint8_t, 18> arrShellcode =
+                {
+                    0x51,                               // push rcx
+                    0x41, 0x5A,                         // pop r10
+                    0xB8, 0x00, 0x00, 0x00, 0x00,       // mov eax, 0x00000000 (syscall number placeholder)
+                    0x0F, 0x05,                         // syscall
+                    0x48, 0x83, 0xC4, 0x08,             // add rsp, 8
+                    0xFF, 0x64, 0x24, 0xF8              // jmp qword ptr [rsp-8]
+                };
+
+                static constexpr size_t getStubSize() { return arrShellcode.size(); }
+
+                static void generate(uint8_t* pBuffer, uint32_t uSyscallNumber, void* /*pGadgetAddress*/)
+                {
+                    crt::memory::copy(pBuffer, arrShellcode.data(), arrShellcode.size());
+                    *reinterpret_cast<uint32_t*>(pBuffer + 4) = uSyscallNumber;
+                }
+            };
+
+            struct exception
+            {
+                static constexpr bool bRequiresGadget = true;
+                static constexpr size_t getStubSize() { return 8; }
+                static void generate(uint8_t* pBuffer, uint32_t /*uSyscallNumber*/, void* /*pGadgetAddress*/)
+                {
+                    pBuffer[0] = 0x0F;
+                    pBuffer[1] = 0x0B;
+                    pBuffer[2] = 0xC3;
+                    crt::memory::set(pBuffer + 2, 0x90, getStubSize() - 3);
+                }
+            };
+        }
+        namespace parser
+        {
+            struct exception
+            {
+                static std::vector<SyscallEntry_t> parse(const ModuleInfo_t& module)
+                {
+                    std::vector<SyscallEntry_t> vecFoundSyscalls;
+
+                    auto uExceptionDirRva = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress;
+                    if (!uExceptionDirRva)
+                        return vecFoundSyscalls;
+
+                    auto pRuntimeFunctions = reinterpret_cast<PIMAGE_RUNTIME_FUNCTION_ENTRY>(module.m_pModuleBase + uExceptionDirRva);
+                    auto uExceptionDirSize = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].Size;
+                    auto uFunctionCount = uExceptionDirSize / sizeof(IMAGE_RUNTIME_FUNCTION_ENTRY);
+
+                    auto pFunctionsRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfFunctions);
+                    auto pNamesRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNames);
+                    auto pOrdinalsRva = reinterpret_cast<uint16_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNameOrdinals);
+
+                    std::unordered_map<uint32_t, const char*> mapRvaToName;
+                    for (uint32_t i = 0; i < module.m_pExportDir->NumberOfNames; ++i)
+                    {
+                        const char* szName = reinterpret_cast<const char*>(module.m_pModuleBase + pNamesRVA[i]);
+                        uint16_t uOrdinal = pOrdinalsRva[i];
+                        uint32_t uFunctionRva = pFunctionsRVA[uOrdinal];
+                        mapRvaToName[uFunctionRva] = szName;
+                    }
+
+                    uint32_t uSyscallNumber = 0;
+                    for (DWORD i = 0; i < uFunctionCount; ++i)
+                    {
+                        auto pFunction = &pRuntimeFunctions[i];
+                        if (pFunction->BeginAddress == 0)
+                            break;
+
+                        auto it = mapRvaToName.find(pFunction->BeginAddress);
+                        if (it != mapRvaToName.end())
+                        {
+                            const char* szName = it->second;
+
+                            if (hashing::calculateHashRuntime(szName, 2) == hashing::calculateHash("Zw"))
+                            {
+                                char szNtName[128];
+                                crt::string::copy(szNtName, 128, szName);
+                                szNtName[0] = 'N';
+                                szNtName[1] = 't';
+
+                                const SyscallKey_t key = SYSCALL_ID_RT(szNtName);
+
+                                vecFoundSyscalls.push_back(SyscallEntry_t{
+                                            key,
+                                            uSyscallNumber,
+                                            0
+                                    });
+                                uSyscallNumber++;
+                            }
+                        }
+                    }
+
+                    return vecFoundSyscalls;
+                }
+            };
+
+            struct signature
+            {
+                static std::vector<SyscallEntry_t> parse(const ModuleInfo_t& module)
+                {
+                    std::vector<SyscallEntry_t> vecFoundSyscalls;
+
+                    auto pFunctionsRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfFunctions);
+                    auto pNamesRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNames);
+                    auto pOrdinalsRva = reinterpret_cast<uint16_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNameOrdinals);
+
+                    for (uint32_t i = 0; i < module.m_pExportDir->NumberOfNames; i++)
+                    {
+                        const char* szName = reinterpret_cast<const char*>(module.m_pModuleBase + pNamesRVA[i]);
+
+                        if (hashing::calculateHashRuntime(szName, 2) != hashing::calculateHash("Nt"))
+                            continue;
+
+                        uint16_t uOrdinal = pOrdinalsRva[i];
+                        uint32_t uFunctionRva = pFunctionsRVA[uOrdinal];
+
+                        auto pExportSectionStart = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+                        auto pExportSectionEnd = pExportSectionStart + module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
+                        if (uFunctionRva >= pExportSectionStart && uFunctionRva < pExportSectionEnd)
+                            continue;
+
+                        uint8_t* pFunctionStart = module.m_pModuleBase + uFunctionRva;
+                        uint32_t uSyscallNumber = 0;
+
+                        bool bIsHooked = false;
+
+                        // @note / SapDragon: 0xB8D18B4C disasm
+                        // mov r10, rcx; mov eax, syscall_number
+                        // mov r10, rcx
+                        // mov eax, imm32
+                        if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C)
+                            uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 4);
+                        else if (isFunctionHooked(pFunctionStart))
+                            bIsHooked = true;
+
+                        if (bIsHooked)
+                        {
+                            // @note / SapDragon: search up
+                            for (int j = 1; j < 20; ++j)
+                            {
+                                uint8_t* pNeighborFunc = pFunctionStart - (j * 0x20);
+                                if (reinterpret_cast<uintptr_t>(pNeighborFunc) < reinterpret_cast<uintptr_t>(module.m_pModuleBase)) break;
+                                if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C)
+                                {
+                                    uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
+                                    uSyscallNumber = uNeighborSyscall + j;
+                                    break;
+                                }
+                            }
+
+                            // @note / SapDragon: search down
+                            if (!uSyscallNumber)
+                            {
+                                for (int j = 1; j < 20; ++j)
+                                {
+                                    uint8_t* pNeighborFunc = pFunctionStart + (j * 0x20);
+                                    if (reinterpret_cast<uintptr_t>(pNeighborFunc) > (reinterpret_cast<uintptr_t>(module.m_pModuleBase) + module.m_pNtHeaders->OptionalHeader.SizeOfImage)) break;
+                                    if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C)
+                                    {
+                                        uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
+                                        uSyscallNumber = uNeighborSyscall - j;
+                                        break;
+                                    }
+                                }
+                            }
+                        }
+
+                        if (uSyscallNumber)
+                        {
+                            const SyscallKey_t key = SYSCALL_ID_RT(szName);
                             vecFoundSyscalls.push_back(SyscallEntry_t{
                                         key,
                                         uSyscallNumber,
                                         0
                                 });
-                            uSyscallNumber++;
                         }
                     }
+                    return vecFoundSyscalls;
                 }
-
-                return vecFoundSyscalls;
-            }
-        };
-
-        struct SignatureScanningParser
-        {
-            static std::vector<SyscallEntry_t> parse(const ModuleInfo_t& module)
-            {
-                std::vector<SyscallEntry_t> vecFoundSyscalls;
-
-                auto pFunctionsRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfFunctions);
-                auto pNamesRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNames);
-                auto pOrdinalsRva = reinterpret_cast<uint16_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNameOrdinals);
-
-                for (uint32_t i = 0; i < module.m_pExportDir->NumberOfNames; i++)
+            private:
+                static bool isFunctionHooked(const uint8_t* pFunctionStart)
                 {
-                    const char* szName = reinterpret_cast<const char*>(module.m_pModuleBase + pNamesRVA[i]);
+                    const uint8_t* pCurrent = pFunctionStart;
 
-                    if (hashing::calculateHashRuntime(szName, 2) != hashing::calculateHash("Nt"))
-                        continue;
+                    while (*pCurrent == 0x90)
+                        pCurrent++;
 
-                    uint16_t uOrdinal = pOrdinalsRva[i];
-                    uint32_t uFunctionRva = pFunctionsRVA[uOrdinal];
-
-                    auto pExportSectionStart = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-                    auto pExportSectionEnd = pExportSectionStart + module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
-                    if (uFunctionRva >= pExportSectionStart && uFunctionRva < pExportSectionEnd)
-                        continue;
-
-                    uint8_t* pFunctionStart = module.m_pModuleBase + uFunctionRva;
-                    uint32_t uSyscallNumber = 0;
-
-                    bool bIsHooked = false;
-
-                    // @note / SapDragon: 0xB8D18B4C disasm
-                    // mov r10, rcx; mov eax, syscall_number
-                    // mov r10, rcx
-                    // mov eax, imm32
-                    if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C)
-                        uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 4);
-                    else if (isFunctionHooked(pFunctionStart))
-                        bIsHooked = true;
-
-                    if (bIsHooked)
+                    switch (pCurrent[0])
                     {
-                        // @note / SapDragon: search up
-                        for (int j = 1; j < 20; ++j)
-                        {
-                            uint8_t* pNeighborFunc = pFunctionStart - (j * 0x20);
-                            if (reinterpret_cast<uintptr_t>(pNeighborFunc) < reinterpret_cast<uintptr_t>(module.m_pModuleBase)) break;
-                            if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C)
-                            {
-                                uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
-                                uSyscallNumber = uNeighborSyscall + j;
-                                break;
-                            }
-                        }
-
-                        // @note / SapDragon: search down
-                        if (!uSyscallNumber)
-                        {
-                            for (int j = 1; j < 20; ++j)
-                            {
-                                uint8_t* pNeighborFunc = pFunctionStart + (j * 0x20);
-                                if (reinterpret_cast<uintptr_t>(pNeighborFunc) > (reinterpret_cast<uintptr_t>(module.m_pModuleBase) + module.m_pNtHeaders->OptionalHeader.SizeOfImage)) break;
-                                if (*reinterpret_cast<uint32_t*>(pNeighborFunc) == 0xB8D18B4C)
-                                {
-                                    uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
-                                    uSyscallNumber = uNeighborSyscall - j;
-                                    break;
-                                }
-                            }
-                        }
-                    }
-
-                    if (uSyscallNumber)
-                    {
-                        const SyscallKey_t key = SYSCALL_ID_RT(szName);
-                        vecFoundSyscalls.push_back(SyscallEntry_t{
-                                    key,
-                                    uSyscallNumber,
-                                    0
-                            });
-                    }
-                }
-                return vecFoundSyscalls;
-            }
-
-        private:
-            static bool isFunctionHooked(const uint8_t* pFunctionStart)
-            {
-                const uint8_t* pCurrent = pFunctionStart;
-
-                while (*pCurrent == 0x90)
-                    pCurrent++;
-
-                switch (pCurrent[0])
-                {
-                    // @note / SapDragon: JMP rel32
-                case 0xE9:
-                    // @note / SapDragon: JMP rel8
-                case 0xEB:
-                    // @note / SapDragon: push imm32
-                case 0x68:
-                    return true;
-                    // @note / SapDragon: jmp [mem] / jmp [rip + offset]
-                case 0xFF:
-                    if (pCurrent[1] == 0x25)
+                        // @note / SapDragon: JMP rel32
+                    case 0xE9:
+                        // @note / SapDragon: JMP rel8
+                    case 0xEB:
+                        // @note / SapDragon: push imm32
+                    case 0x68:
                         return true;
-                    break;
+                        // @note / SapDragon: jmp [mem] / jmp [rip + offset]
+                    case 0xFF:
+                        if (pCurrent[1] == 0x25)
+                            return true;
+                        break;
 
-                    // @note / SapDragon: int3...
-                case 0xCC:
-                    return true;
+                        // @note / SapDragon: int3...
+                    case 0xCC:
+                        return true;
 
-                default:
-                    break;
+                    default:
+                        break;
+                    }
+
+                    return false;
                 }
-
-                return false;
-            }
-        };
-    }
+            };
+        } // parsing
+    } // policies
 
 
     template<typename T>
@@ -616,7 +621,7 @@ namespace syscall
             m_bInitialized = createSyscalls();
             if (m_bInitialized)
             {
-                if constexpr (std::is_same_v<IStubGenerationPolicy, policies::ExceptionStubGenerator>)
+                if constexpr (std::is_same_v<IStubGenerationPolicy, policies::generator::exception>)
                 {
                     m_pVehHandle = AddVectoredExceptionHandler(1, VectoredExceptionHandler);
                     if (!m_pVehHandle)
@@ -659,7 +664,7 @@ namespace syscall
 
             uint8_t* pStubAddress = reinterpret_cast<uint8_t*>(m_pSyscallRegion) + it->m_uOffset;
 
-            if constexpr (std::is_same_v<IStubGenerationPolicy, policies::ExceptionStubGenerator>)
+            if constexpr (std::is_same_v<IStubGenerationPolicy, policies::generator::exception>)
             {
                 const size_t uGadgetCount = m_vecSyscallGadgets.size();
 
@@ -787,8 +792,8 @@ namespace syscall
     };
 
     using DefaultParserChain = syscall::ParserChain_t<
-        syscall::policies::ExceptionDirectoryParser,
-        syscall::policies::SignatureScanningParser
+        syscall::policies::parser::exception,
+        syscall::policies::parser::signature
     >;
 
     // @note / sapdragon: fucking templates, is that a legal cpp hack? unpack overloads...
@@ -810,8 +815,8 @@ namespace syscall
 }
 
 
-using SyscallSectionGadget = syscall::Manager<syscall::policies::SectionAllocator, syscall::policies::GadgetStubGenerator>;
-using SyscallHeapGadget = syscall::Manager<syscall::policies::HeapAllocator, syscall::policies::GadgetStubGenerator>;
-using SyscallSectionDirect = syscall::Manager<syscall::policies::SectionAllocator, syscall::policies::DirectStubGenerator>;
+using SyscallSectionGadget = syscall::Manager<syscall::policies::allocator::secton, syscall::policies::generator::gadget>;
+using SyscallHeapGadget = syscall::Manager<syscall::policies::allocator::heap, syscall::policies::generator::gadget>;
+using SyscallSectionDirect = syscall::Manager<syscall::policies::allocator::secton, syscall::policies::generator::direct>;
 
 #endif 

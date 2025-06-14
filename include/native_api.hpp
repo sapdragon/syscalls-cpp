@@ -9,6 +9,15 @@
 
 namespace native
 {
+    inline PPEB getCurrentPEB()
+    {
+#ifdef _M_X64
+        return (PEB*)(__readgsqword(0x60));
+#elif _WIN32
+        return (PEB*)(__readfsdword(0x30));
+#endif
+    }
+
     inline hashing::Hash_t calculateHashRuntimeCi(const wchar_t* wzData)
     {
         if (!wzData)
@@ -28,7 +37,7 @@ namespace native
 
     inline HMODULE getModuleBase(const wchar_t* wzModuleName)
     {
-        auto pPeb = reinterpret_cast<PPEB>(__readgsqword(0x60));
+        auto pPeb = getCurrentPEB();
         if (!pPeb || !pPeb->Ldr)
             return nullptr;
 
@@ -49,7 +58,7 @@ namespace native
 
     inline HMODULE getModuleBase(hashing::Hash_t uModuleHash)
     {
-        auto pPeb = reinterpret_cast<PPEB>(__readgsqword(0x60));
+        auto pPeb = getCurrentPEB();
         if (!pPeb || !pPeb->Ldr) 
             return nullptr;
 

@@ -1,10 +1,10 @@
 # syscalls-cpp
 
-syscalls-cpp is just another syscall library. It leverages a policy-based design to let you mix and match different strategies for memory allocation and stub generation at compile-time, giving you full control over your operational security tradeoffs.
+syscalls-cpp is just another syscall library ( x86 / x64 ). It leverages a policy-based design to let you mix and match different strategies for memory allocation and stub generation at compile-time, giving you full control over your operational security tradeoffs.
 
 The core principle is **modularity**. You are not given a black box; you are given building blocks.
 
-**The library automatically resolves system call numbers by directly parsing `ntdll.dll` and is resilient to user-mode hooks by searching for adjacent syscalls if a target is patched.**
+**The library automatically resolves system call numbers by directly parsing ntdll.dll's metadata. This method is resilient to user-mode hooks by leveraging the PE's structure—the exception directory on x64 and sorted export addresses on x86—and can find adjacent syscalls if a target is patched.**
 
 ## The Building Blocks: Provided Policies
 
@@ -22,14 +22,14 @@ You can combine any allocation policy with any stub generation policy.
 
 | Policy                | Method                                              |
 | --------------------- | ----------------------------------------------------|
-| `generator::gadget` | Jumps to a `syscall; ret` gadget found in `ntdll.dll|
 | `generator::direct` | Uses a classic, self-contained `syscall` instruction|
-| `generator::exception` | Triggers a breakpoint (`ud2`) to perform the syscall via a custom Vectored Exception Handler (VEH). |
+| `generator::gadget` only | (Only x64) Jumps to a `syscall; ret` gadget found in `ntdll.dll|
+| `generator::exception` | (Only x64) Triggers a breakpoint (`ud2`) to perform the syscall via a custom Vectored Exception Handler (VEH). |
 
 #### Parsing Policies (`IsSyscallParsingPolicy`)
 | Policy | Method |
 | :--- | :--- |
-| `parser::exception` | Parses the PE exception directory (`.pdata` section) of the module. This is the most reliable method. |
+| `parser::directory` | On x64, maps the exception directory (.pdata) to the export table to determine the order of syscalls. On x86, it sorts exported Zw* functions by their memory addresses to calculate their numbers. |
 | `parser::signature` | Scans function prologues for the `mov r10, rcx; mov eax, syscall_id` signature with hooks detection. |
 
 
@@ -43,7 +43,7 @@ The power is in the combination. Here is how you build and use a syscall manager
 #include "syscall.hpp"
 
 int main() {
-    SyscallSectionGadget syscallManager;
+    SyscallSectionDirect syscallManager;
     // you can add your own modules for parsing syscalls, by default only ntdll is parsed
     if (!syscallManager.initialize(/* SYSCALL_ID("ntdll.dll"),  SYSCALL_ID("win32u.dll")*/))
     {
@@ -79,8 +79,8 @@ For more control, you can specify your own policy or build a custom allocators /
 
 using UniqueSecretOwnPolicyManager = syscall::Manager<
         syscall::policies::allocator::heap, // heap allocator
-        syscall::policies::generator::gadget, // gadget by ntdll
-        DefaultParserChain  // default exception directory + improved halo gates as a fallback is used
+        syscall::policies::generator::direct, // direct!!
+        DefaultParserChain  // default exception/sort directory + improved halo gates as a fallback is used
 >;
 
 // or, let's build a custom parser chain using the ParserChain_t helper
@@ -113,4 +113,4 @@ For easier debugging, you can disable the compile-time hashing mechanism by defi
 ## Requirements
 
 -   A C++20 compatible compiler (MSVC, Clang, GCC).
--   Windows x64 target.
+-   Windows targets (x86/x64)

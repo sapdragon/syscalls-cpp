@@ -19,6 +19,7 @@
 #include "hash.hpp"
 #include "native_api.hpp"
 
+
 namespace syscall
 {
 
@@ -71,6 +72,7 @@ namespace syscall
         CExceptionContextGuard& operator=(const CExceptionContextGuard&) = delete;
     };
 
+#if defined(_WIN64)
     LONG NTAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
     {
         if (!pExceptionContext.m_bShouldHandle)
@@ -90,6 +92,7 @@ namespace syscall
 
         return EXCEPTION_CONTINUE_SEARCH;
     }
+#endif
 
     namespace policies
     {
@@ -243,6 +246,8 @@ namespace syscall
         } // allocator
         namespace generator
         {
+#if defined(_WIN64)
+            // @note / SapDragon: supports only on x64 now
             struct gadget
             {
                 static constexpr bool bRequiresGadget = true;
@@ -272,29 +277,6 @@ namespace syscall
                 }
             };
 
-            struct direct
-            {
-                static constexpr bool bRequiresGadget = false;
-
-                inline static constexpr std::array<uint8_t, 18> arrShellcode =
-                {
-                    0x51,                               // push rcx
-                    0x41, 0x5A,                         // pop r10
-                    0xB8, 0x00, 0x00, 0x00, 0x00,       // mov eax, 0x00000000 (syscall number placeholder)
-                    0x0F, 0x05,                         // syscall
-                    0x48, 0x83, 0xC4, 0x08,             // add rsp, 8
-                    0xFF, 0x64, 0x24, 0xF8              // jmp qword ptr [rsp-8]
-                };
-
-                static constexpr size_t getStubSize() { return arrShellcode.size(); }
-
-                static void generate(uint8_t* pBuffer, uint32_t uSyscallNumber, void* /*pGadgetAddress*/)
-                {
-                    crt::memory::copy(pBuffer, arrShellcode.data(), arrShellcode.size());
-                    *reinterpret_cast<uint32_t*>(pBuffer + 4) = uSyscallNumber;
-                }
-            };
-
             struct exception
             {
                 static constexpr bool bRequiresGadget = true;
@@ -307,15 +289,52 @@ namespace syscall
                     crt::memory::set(pBuffer + 2, 0x90, getStubSize() - 3);
                 }
             };
+#endif
+            struct direct
+            {
+                static constexpr bool bRequiresGadget = false;
+
+#if defined(_WIN64)
+                inline static constexpr std::array<uint8_t, 18> arrShellcode =
+                {
+                    0x51,                               // push rcx
+                    0x41, 0x5A,                         // pop r10
+                    0xB8, 0x00, 0x00, 0x00, 0x00,       // mov eax, 0x00000000 (syscall number placeholder)
+                    0x0F, 0x05,                         // syscall
+                    0x48, 0x83, 0xC4, 0x08,             // add rsp, 8
+                    0xFF, 0x64, 0x24, 0xF8              // jmp qword ptr [rsp-8]
+                };
+#elif defined(_WIN32)
+                inline static constexpr std::array<uint8_t, 15> arrShellcode =
+                {
+                    0xB8, 0x00, 0x00, 0x00, 0x00,       // mov eax, 0x00000000 (syscall number placeholder)
+                    0x89, 0xE2,                         // mov edx, esp
+                    0x64, 0xFF, 0x15, 0xC0, 0x00, 0x00, 0x00, // call dword ptr fs:[0xC0]
+                    0xC3                                // ret
+                };
+#endif
+                static void generate(uint8_t* pBuffer, uint32_t uSyscallNumber, void* /*pGadgetAddress*/)
+                {
+                    crt::memory::copy(pBuffer, arrShellcode.data(), arrShellcode.size());
+#ifdef defined(_WIN64)
+                    *reinterpret_cast<uint32_t*>(pBuffer + 4) = uSyscallNumber;
+#elif defined(_WIN32)
+                    * reinterpret_cast<uint32_t*>(pBuffer + 1) = uSyscallNumber;
+#endif
+                }
+                static constexpr size_t getStubSize() { return arrShellcode.size(); }
+            };
+
         }
         namespace parser
         {
-            struct exception
+            struct directory
             {
                 static std::vector<SyscallEntry_t> parse(const ModuleInfo_t& module)
                 {
                     std::vector<SyscallEntry_t> vecFoundSyscalls;
 
+#if defined(_WIN64)
                     auto uExceptionDirRva = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXCEPTION].VirtualAddress;
                     if (!uExceptionDirRva)
                         return vecFoundSyscalls;
@@ -358,16 +377,60 @@ namespace syscall
 
                                 const SyscallKey_t key = SYSCALL_ID_RT(szNtName);
 
-                                vecFoundSyscalls.push_back(SyscallEntry_t{
-                                            key,
-                                            uSyscallNumber,
-                                            0
-                                    });
+                                vecFoundSyscalls.push_back(SyscallEntry_t{ key, uSyscallNumber, 0 });
                                 uSyscallNumber++;
                             }
                         }
                     }
 
+#elif defined(_WIN32)
+                    auto pFunctionsRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfFunctions);
+                    auto pNamesRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNames);
+                    auto pOrdinalsRva = reinterpret_cast<uint16_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNameOrdinals);
+
+                    std::vector<std::pair<uintptr_t, const char*>> vecZwFunctions;
+                    for (uint32_t i = 0; i < module.m_pExportDir->NumberOfNames; ++i)
+                    {
+                        const char* szName = reinterpret_cast<const char*>(module.m_pModuleBase + pNamesRVA[i]);
+
+                        if (szName[0] == 'Z' && szName[1] == 'w')
+                        {
+                            uint16_t uOrdinal = pOrdinalsRva[i];
+                            uint32_t uFunctionRva = pFunctionsRVA[uOrdinal];
+
+                            auto pExportSectionStart = module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+                            auto pExportSectionEnd = pExportSectionStart + module.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
+                            if (uFunctionRva >= pExportSectionStart && uFunctionRva < pExportSectionEnd)
+                                continue;
+
+                            uintptr_t uFunctionAddress = reinterpret_cast<uintptr_t>(module.m_pModuleBase + uFunctionRva);
+                            vecZwFunctions.push_back({ uFunctionAddress, szName });
+                        }
+                    }
+
+                    if (vecZwFunctions.empty())
+                        return vecFoundSyscalls;
+
+                    std::sort(vecZwFunctions.begin(), vecZwFunctions.end(),
+                        [](const auto& a, const auto& b) {
+                            return a.first < b.first;
+                        });
+
+                    for (size_t i = 0; i < vecZwFunctions.size(); ++i)
+                    {
+                        const char* szZwName = vecZwFunctions[i].second;
+
+                        char szNtName[128];
+                        crt::string::copy(szNtName, 128, szZwName);
+                        szNtName[0] = 'N';
+                        szNtName[1] = 't';
+
+                        const SyscallKey_t key = SYSCALL_ID_RT(szNtName);
+                        const uint32_t uSyscallNumber = static_cast<uint32_t>(i);
+
+                        vecFoundSyscalls.push_back(SyscallEntry_t{ key, uSyscallNumber, 0 });
+                    }
+#endif
                     return vecFoundSyscalls;
                 }
             };
@@ -399,20 +462,24 @@ namespace syscall
 
                         uint8_t* pFunctionStart = module.m_pModuleBase + uFunctionRva;
                         uint32_t uSyscallNumber = 0;
-
                         bool bIsHooked = false;
 
-                        // @note / SapDragon: 0xB8D18B4C disasm
-                        // mov r10, rcx; mov eax, syscall_number
-                        // mov r10, rcx
-                        // mov eax, imm32
+#if defined(_WIN64)
                         if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C)
                             uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 4);
+#elif defined(_WIN32)
+                        if (*pFunctionStart == 0xB8)
+                            uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 1);
+#endif
+
+#if defined(_WIN64)
                         else if (isFunctionHooked(pFunctionStart))
                             bIsHooked = true;
 
                         if (bIsHooked)
                         {
+                            // @note / SapDragon: stable only on x64
+
                             // @note / SapDragon: search up
                             for (int j = 1; j < 20; ++j)
                             {
@@ -442,6 +509,7 @@ namespace syscall
                                 }
                             }
                         }
+#endif
 
                         if (uSyscallNumber)
                         {
@@ -541,9 +609,10 @@ namespace syscall
         ManagerImpl() = default;
         ~ManagerImpl()
         {
+#if defined(_WIN64)
             if (m_pVehHandle)
                 RemoveVectoredExceptionHandler(m_pVehHandle);
-
+#endif
             IAllocationPolicy::release(m_pSyscallRegion, m_hObjectHandle);
         }
 
@@ -590,11 +659,11 @@ namespace syscall
 
             if (m_bInitialized)
                 return true;
-
+#if defined(_WIN64)
             if constexpr (IStubGenerationPolicy::bRequiresGadget)
                 if (!findSyscallGadgets())
                     return false;
-
+#endif
             m_vecParsedSyscalls.clear();
             for (const auto& moduleKey : vecModuleKeys)
             {
@@ -621,8 +690,10 @@ namespace syscall
             m_bInitialized = createSyscalls();
             if (m_bInitialized)
             {
+#if defined(_WIN64)
                 if constexpr (std::is_same_v<IStubGenerationPolicy, policies::generator::exception>)
                 {
+
                     m_pVehHandle = AddVectoredExceptionHandler(1, VectoredExceptionHandler);
                     if (!m_pVehHandle)
                     {
@@ -631,6 +702,7 @@ namespace syscall
                         m_bInitialized = false;
                     }
                 }
+#endif
             }
 
             return m_bInitialized;
@@ -660,10 +732,10 @@ namespace syscall
                 return Ret{};
             }
 
-            using Function_t = Ret(NTAPI*)(Args...);
+            using Function_t = Ret(SYSCALL_API*)(Args...);
 
             uint8_t* pStubAddress = reinterpret_cast<uint8_t*>(m_pSyscallRegion) + it->m_uOffset;
-
+#if defined(_WIN64)
             if constexpr (std::is_same_v<IStubGenerationPolicy, policies::generator::exception>)
             {
                 const size_t uGadgetCount = m_vecSyscallGadgets.size();
@@ -681,10 +753,8 @@ namespace syscall
                 CExceptionContextGuard contextGuard(pStubAddress, pRandomGadget, it->m_uSyscallNumber);
                 return reinterpret_cast<Function_t>(pStubAddress)(std::forward<Args>(args)...);
             }
-            else
-            {
-                return reinterpret_cast<Function_t>(pStubAddress)(std::forward<Args>(args)...);
-            }
+#endif
+            return reinterpret_cast<Function_t>(pStubAddress)(std::forward<Args>(args)...);
         }
     private:
         template<IsSyscallParsingPolicy CurrentParser, IsSyscallParsingPolicy... OtherParsers>
@@ -758,7 +828,7 @@ namespace syscall
             return true;
         }
 
-
+#if defined(_WIN64)
         bool findSyscallGadgets()
         {
             ModuleInfo_t ntdll;
@@ -788,11 +858,12 @@ namespace syscall
 
             return !m_vecSyscallGadgets.empty();
         }
+#endif
 
     };
 
     using DefaultParserChain = syscall::ParserChain_t<
-        syscall::policies::parser::exception,
+        syscall::policies::parser::directory,
         syscall::policies::parser::signature
     >;
 
@@ -813,10 +884,10 @@ namespace syscall
     {
     };
 }
-
-
+#if defined(_WIN64)
 using SyscallSectionGadget = syscall::Manager<syscall::policies::allocator::secton, syscall::policies::generator::gadget>;
 using SyscallHeapGadget = syscall::Manager<syscall::policies::allocator::heap, syscall::policies::generator::gadget>;
+#endif
 using SyscallSectionDirect = syscall::Manager<syscall::policies::allocator::secton, syscall::policies::generator::direct>;
 
 #endif 

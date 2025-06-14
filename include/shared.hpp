@@ -96,6 +96,7 @@ typedef NTSTATUS(NTAPI* NtFreeVirtualMemory_t)(
 using RtlCreateHeap_t = PVOID(NTAPI*)(ULONG, PVOID, SIZE_T, SIZE_T, PVOID, PVOID);
 using RtlAllocateHeap_t = PVOID(NTAPI*)(PVOID, ULONG, SIZE_T);
 using RtlDestroyHeap_t = PVOID(NTAPI*)(PVOID);
+using NtCloseHandle_t = NTSTATUS(NTAPI*)(HANDLE);
 
 struct SHARED_LDR_DATA_TABLE_ENTRY
 {
@@ -134,10 +135,10 @@ struct SHARED_LDR_DATA_TABLE_ENTRY
     union _LARGE_INTEGER LoadTime;                                          //0xd8
 };
 
-#if defined(_MSC_VER)
-#define STR_ICMP _wcsicmp
-#else
-#define STR_ICMP wcscasecmp
+#if defined(_WIN32)
+#define SYSCALL_API __cdecl
+#elif defined(_M_X64)
+#define SYSCALL_API NTAPI
 #endif
 
 #endif  

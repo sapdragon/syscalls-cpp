@@ -527,7 +527,7 @@ namespace syscall
                 static bool isFunctionHooked(const uint8_t* pFunctionStart)
                 {
                     const uint8_t* pCurrent = pFunctionStart;
-
+                        
                     while (*pCurrent == 0x90)
                         pCurrent++;
 
@@ -540,6 +540,7 @@ namespace syscall
                         // @note / SapDragon: push imm32
                     case 0x68:
                         return true;
+
                         // @note / SapDragon: jmp [mem] / jmp [rip + offset]
                     case 0xFF:
                         if (pCurrent[1] == 0x25)
@@ -549,6 +550,18 @@ namespace syscall
                         // @note / SapDragon: int3...
                     case 0xCC:
                         return true;
+
+                        // @note / SapDragon: ud2
+                    case 0x0F:
+                        if (pCurrent[1] == 0x0B)
+                            return true;
+                        break;
+
+                        // @note / SapDragon: int 0x3
+                    case 0xCD:
+                        if (pCurrent[1] == 0x03)
+                            return true;
+                        break;
 
                     default:
                         break;

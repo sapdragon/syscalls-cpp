@@ -98,7 +98,7 @@ namespace syscall
     {
         namespace allocator
         {
-            struct secton
+            struct section
             {
                 static bool allocate(size_t uRegionSize, const std::vector<uint8_t>& vecBuffer, void*& pOutRegion, HANDLE& /*unused*/)
                 {
@@ -898,9 +898,9 @@ namespace syscall
     };
 }
 #if defined(_WIN64)
-using SyscallSectionGadget = syscall::Manager<syscall::policies::allocator::secton, syscall::policies::generator::gadget>;
+using SyscallSectionGadget = syscall::Manager<syscall::policies::allocator::section, syscall::policies::generator::gadget>;
 using SyscallHeapGadget = syscall::Manager<syscall::policies::allocator::heap, syscall::policies::generator::gadget>;
 #endif
-using SyscallSectionDirect = syscall::Manager<syscall::policies::allocator::secton, syscall::policies::generator::direct>;
+using SyscallSectionDirect = syscall::Manager<syscall::policies::allocator::section, syscall::policies::generator::direct>;
 
 #endif 

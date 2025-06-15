@@ -316,7 +316,7 @@ namespace syscall
                 static void generate(uint8_t* pBuffer, uint32_t uSyscallNumber, void* /*pGadgetAddress*/)
                 {
                     crt::memory::copy(pBuffer, arrShellcode.data(), arrShellcode.size());
-#ifdef defined(_WIN64)
+#if defined(_WIN64)
                     *reinterpret_cast<uint32_t*>(pBuffer + 4) = uSyscallNumber;
 #elif defined(_WIN32)
                     * reinterpret_cast<uint32_t*>(pBuffer + 1) = uSyscallNumber;

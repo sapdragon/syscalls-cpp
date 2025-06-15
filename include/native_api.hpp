@@ -190,9 +190,22 @@ namespace native
 
                     wchar_t wzWideDllName[260];
                     crt::string::mbToWcs(wzWideDllName, crt::getCountOf(wzWideDllName), szForwarderDllName);
-                    crt::string::concat(wzWideDllName, crt::getCountOf(wzWideDllName), L".dll");
-
                     hashing::Hash_t uForwarderDllHash = calculateHashRuntimeCi(wzWideDllName);
+                    if (!uForwarderDllHash)
+                        return nullptr;
+
+                    uForwarderDllHash ^= static_cast<hashing::Hash_t>('.');
+                    uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+
+                    uForwarderDllHash ^= static_cast<hashing::Hash_t>('d');
+                    uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+
+                    uForwarderDllHash ^= static_cast<hashing::Hash_t>('l');
+                    uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+
+                    uForwarderDllHash ^= static_cast<hashing::Hash_t>('l');
+                    uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+
                     HMODULE hForwarderModuleBase = getModuleBase(uForwarderDllHash);
                     if (!hForwarderModuleBase) 
                         return nullptr;

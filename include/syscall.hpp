@@ -692,13 +692,18 @@ namespace syscall
             if (m_vecParsedSyscalls.empty())
                 return false;
 
+            if (m_vecParsedSyscalls.size() > 1)
+                for (size_t i = m_vecParsedSyscalls.size() - 1; i > 0; --i)
+                    std::swap(m_vecParsedSyscalls[i], m_vecParsedSyscalls[native::rdtscp() % (i + 1)]);
+
+            for (size_t i = 0; i < m_vecParsedSyscalls.size(); ++i)
+                m_vecParsedSyscalls[i].m_uOffset = static_cast<uint32_t>(i * IStubGenerationPolicy::getStubSize());
+
+
             std::sort(m_vecParsedSyscalls.begin(), m_vecParsedSyscalls.end(),
                 [](const SyscallEntry_t& a, const SyscallEntry_t& b) {
                     return a.m_key < b.m_key;
                 });
-
-            for (size_t i = 0; i < m_vecParsedSyscalls.size(); ++i)
-                m_vecParsedSyscalls[i].m_uOffset = static_cast<uint32_t>(i * IStubGenerationPolicy::getStubSize());
 
             m_bInitialized = createSyscalls();
             if (m_bInitialized)
@@ -706,7 +711,6 @@ namespace syscall
 #if defined(_WIN64)
                 if constexpr (std::is_same_v<IStubGenerationPolicy, policies::generator::exception>)
                 {
-
                     m_pVehHandle = AddVectoredExceptionHandler(1, VectoredExceptionHandler);
                     if (!m_pVehHandle)
                     {

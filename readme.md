@@ -1,6 +1,6 @@
 # syscalls-cpp
 
-syscalls-cpp is just another syscall library ( x86 / x64 ). It leverages a policy-based design to let you mix and match different strategies for memory allocation and stub generation at compile-time, giving you full control over your operational security tradeoffs.
+syscalls-cpp is a C++20 policy-based framework for crafting undetectable/protected syscalls (x86 / x64). It leverages a policy-based design to let you mix and match different strategies for memory allocation and stub generation at compile-time, giving you full control over your operational security tradeoffs.
 
 The core principle is **modularity**. You are not given a black box; you are given building blocks.
 
@@ -114,3 +114,6 @@ For easier debugging, you can disable the compile-time hashing mechanism by defi
 
 -   A C++20 compatible compiler (MSVC, Clang, GCC).
 -   Windows targets (x86/x64)
+
+## LICENSE
+MIT

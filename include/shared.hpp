@@ -1,17 +1,6 @@
 #ifndef _SHARED_HPP_
 #define _SHARED_HPP_
 
-
-#if defined(_MSC_VER)
-#define SYSCALL_FORCE_INLINE __forceinline
-#elif defined(__GNUC__) || defined(__clang__)
-#define SYSCALL_FORCE_INLINE inline __attribute__((always_inline))
-#else
-#define SYSCALL_FORCE_INLINE inline
-#endif
-
-
-
 #include <Windows.h>
 #include <winternl.h>
 
@@ -135,10 +124,7 @@ struct SHARED_LDR_DATA_TABLE_ENTRY
     union _LARGE_INTEGER LoadTime;                                          //0xd8
 };
 
-#if defined(_WIN32)
-#define SYSCALL_API __cdecl
-#elif defined(_M_X64)
-#define SYSCALL_API NTAPI
-#endif
+
+#include "platform.hpp"
 
 #endif  

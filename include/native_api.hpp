@@ -11,9 +11,9 @@ namespace native
 {
     inline PPEB getCurrentPEB()
     {
-#ifdef _M_X64
+#if SYSCALL_PLATFORM_WINDOWS_64
         return (PEB*)(__readgsqword(0x60));
-#elif _WIN32
+#elif SYSCALL_PLATFORM_WINDOWS_32
         return (PEB*)(__readfsdword(0x30));
 #endif
     }
@@ -59,7 +59,7 @@ namespace native
     inline HMODULE getModuleBase(hashing::Hash_t uModuleHash)
     {
         auto pPeb = getCurrentPEB();
-        if (!pPeb || !pPeb->Ldr) 
+        if (!pPeb || !pPeb->Ldr)
             return nullptr;
 
         auto pLdrData = pPeb->Ldr;
@@ -79,16 +79,16 @@ namespace native
 
     inline void* getExportAddress(HMODULE hModuleBase, const char* szExportName)
     {
-        if (!hModuleBase || !szExportName) 
+        if (!hModuleBase || !szExportName)
             return nullptr;
 
         auto pBase = reinterpret_cast<uint8_t*>(hModuleBase);
         auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(pBase);
-        if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE) 
+        if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
             return nullptr;
 
         auto pNtHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>(pBase + pDosHeader->e_lfanew);
-        if (pNtHeaders->Signature != IMAGE_NT_SIGNATURE) 
+        if (pNtHeaders->Signature != IMAGE_NT_SIGNATURE)
             return nullptr;
 
         auto uExportDirRva = pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
@@ -116,7 +116,7 @@ namespace native
                     crt::string::copy(szForwarderString, sizeof(szForwarderString), reinterpret_cast<const char*>(pBase + uFunctionRva));
 
                     char* szSeparator = crt::string::findChar(szForwarderString, '.');
-                    if (!szSeparator) 
+                    if (!szSeparator)
                         return nullptr;
 
                     *szSeparator = '\0';
@@ -129,7 +129,7 @@ namespace native
                     crt::string::concat(wzWideDllName, crt::getCountOf(wzWideDllName), L".dll");
 
                     HMODULE hForwarderModuleBase = getModuleBase(wzWideDllName);
-                    if (!hForwarderModuleBase) 
+                    if (!hForwarderModuleBase)
                         return nullptr;
 
                     return getExportAddress(hForwarderModuleBase, szForwarderFuncName);
@@ -143,20 +143,20 @@ namespace native
 
     inline void* getExportAddress(HMODULE hModuleBase, hashing::Hash_t uExportHash)
     {
-        if (!hModuleBase) 
+        if (!hModuleBase)
             return nullptr;
 
         auto pBase = reinterpret_cast<uint8_t*>(hModuleBase);
         auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(pBase);
-        if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE) 
+        if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
             return nullptr;
 
         auto pNtHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>(pBase + pDosHeader->e_lfanew);
-        if (pNtHeaders->Signature != IMAGE_NT_SIGNATURE) 
+        if (pNtHeaders->Signature != IMAGE_NT_SIGNATURE)
             return nullptr;
 
         auto uExportDirRva = pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-        if (!uExportDirRva) 
+        if (!uExportDirRva)
             return nullptr;
 
         auto pExportDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(pBase + uExportDirRva);
@@ -181,7 +181,7 @@ namespace native
                     crt::string::copy(szForwarderString, sizeof(szForwarderString), reinterpret_cast<const char*>(pBase + uFunctionRva));
 
                     char* szSeparator = crt::string::findChar(szForwarderString, '.');
-                    if (!szSeparator) 
+                    if (!szSeparator)
                         return nullptr;
 
                     *szSeparator = '\0';
@@ -207,7 +207,7 @@ namespace native
                     uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
 
                     HMODULE hForwarderModuleBase = getModuleBase(uForwarderDllHash);
-                    if (!hForwarderModuleBase) 
+                    if (!hForwarderModuleBase)
                         return nullptr;
 
                     hashing::Hash_t uForwarderFuncHash = hashing::calculateHashRuntime(szForwarderFuncName);
@@ -222,10 +222,10 @@ namespace native
 
     SYSCALL_FORCE_INLINE uint64_t rdtscp()
     {
-        unsigned int uProcessorId; 
-#if defined(_MSC_VER)
+        unsigned int uProcessorId;
+#if SYSCALL_COMPILER_MSVC
         return __rdtscp(&uProcessorId);
-#elif defined(__GNUC__) || defined(__clang__)
+#elif SYSCALL_COMPILER_GCC || SYSCALL_COMPILER_CLANG
         return __builtin_ia32_rdtscp(&uProcessorId);
 #else
 #error "Compiler not supported for RDTSCP intrinsic"

@@ -5,7 +5,7 @@
 #include <string>
 #include <bit>
 
-namespace hashing
+namespace syscall::hashing
 {
     using Hash_t = uint64_t;
 
@@ -78,8 +78,8 @@ namespace hashing
 #define SYSCALL_ID(str) (str)
 #define SYSCALL_ID_RT(str) (str)
 #else
-#define SYSCALL_ID(str) (::hashing::calculateHash(str))
-#define SYSCALL_ID_RT(str) (::hashing::calculateHashRuntime(str))
+#define SYSCALL_ID(str) (syscall::hashing::calculateHash(str))
+#define SYSCALL_ID_RT(str) (syscall::hashing::calculateHashRuntime(str))
 
 #endif
 

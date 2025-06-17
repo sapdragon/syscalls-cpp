@@ -105,10 +105,10 @@ namespace syscall
                 {
                     HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
 
-                    auto fNtCreateSection = reinterpret_cast<NtCreateSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtCreateSection")));
-                    auto fNtMapView = reinterpret_cast<NtMapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtMapViewOfSection")));
-                    auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtUnmapViewOfSection")));
-                    auto fNtClose = reinterpret_cast<NtCloseHandle_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtClose")));
+                    auto fNtCreateSection = reinterpret_cast<native::NtCreateSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtCreateSection")));
+                    auto fNtMapView = reinterpret_cast<native::NtMapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtMapViewOfSection")));
+                    auto fNtUnmapView = reinterpret_cast<native::NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtUnmapViewOfSection")));
+                    auto fNtClose = reinterpret_cast<native::NtClose_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtClose")));
                     if (!fNtCreateSection || !fNtMapView || !fNtUnmapView || !fNtClose)
                         return false;
 
@@ -116,13 +116,13 @@ namespace syscall
                     LARGE_INTEGER sectionSize;
                     sectionSize.QuadPart = uRegionSize;
 
-                    NTSTATUS status = fNtCreateSection(&hSectionHandle, SECTION_ALL_ACCESS, nullptr, &sectionSize, PAGE_EXECUTE_READWRITE, SEC_COMMIT | SEC_NO_CHANGE, nullptr);
+                    NTSTATUS status = fNtCreateSection(&hSectionHandle, SECTION_ALL_ACCESS, nullptr, &sectionSize, PAGE_EXECUTE_READWRITE, SEC_COMMIT | static_cast<ULONG>(native::ESectionAllocAttributes::SECTION_NO_CHANGE), nullptr);
                     if (!NT_SUCCESS(status))
                         return false;
 
                     void* pTempView = nullptr;
                     SIZE_T uViewSize = uRegionSize;
-                    status = fNtMapView(hSectionHandle, NtCurrentProcess(), &pTempView, 0, 0, nullptr, &uViewSize, ViewShare, 0, PAGE_READWRITE);
+                    status = fNtMapView(hSectionHandle, native::getCurrentProcess(), &pTempView, 0, 0, nullptr, &uViewSize, native::ESectionInherit::VIEW_SHARE, 0, PAGE_READWRITE);
                     if (!NT_SUCCESS(status))
                     {
                         fNtClose(hSectionHandle);
@@ -130,9 +130,9 @@ namespace syscall
                     }
 
                     crt::memory::copy(pTempView, vecBuffer.data(), uRegionSize);
-                    fNtUnmapView(NtCurrentProcess(), pTempView);
+                    fNtUnmapView(native::getCurrentProcess(), pTempView);
                     uViewSize = uRegionSize;
-                    status = fNtMapView(hSectionHandle, NtCurrentProcess(), &pOutRegion, 0, 0, nullptr, &uViewSize, ViewShare, 0, PAGE_EXECUTE_READ);
+                    status = fNtMapView(hSectionHandle, native::getCurrentProcess(), &pOutRegion, 0, 0, nullptr, &uViewSize, native::ESectionInherit::VIEW_SHARE, 0, PAGE_EXECUTE_READ);
                     fNtClose(hSectionHandle);
                     return NT_SUCCESS(status) && pOutRegion;
                 }
@@ -141,9 +141,9 @@ namespace syscall
                     HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
                     if (pRegion)
                     {
-                        auto fNtUnmapView = reinterpret_cast<NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtUnmapViewOfSection")));
+                        auto fNtUnmapView = reinterpret_cast<native::NtUnmapViewOfSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtUnmapViewOfSection")));
                         if (fNtUnmapView)
-                            fNtUnmapView(NtCurrentProcess(), pRegion);
+                            fNtUnmapView(native::getCurrentProcess(), pRegion);
                     }
                 }
             };
@@ -157,8 +157,8 @@ namespace syscall
                     if (!hNtdll)
                         return false;
 
-                    auto fRtlCreateHeap = reinterpret_cast<RtlCreateHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlCreateHeap")));
-                    auto fRtlAllocateHeap = reinterpret_cast<RtlAllocateHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlAllocateHeap")));
+                    auto fRtlCreateHeap = reinterpret_cast<native::RtlCreateHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlCreateHeap")));
+                    auto fRtlAllocateHeap = reinterpret_cast<native::RtlAllocateHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlAllocateHeap")));
                     auto fRtlGetLastNtStatus = reinterpret_cast<RtlGetLastNtStatus_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlGetLastNtStatus")));
                     if (!fRtlCreateHeap || !fRtlAllocateHeap)
                         return false;
@@ -187,7 +187,7 @@ namespace syscall
                         if (!hNtdll)
                             return;
 
-                        auto fRtlDestroyHeap = reinterpret_cast<RtlDestroyHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlDestroyHeap")));
+                        auto fRtlDestroyHeap = reinterpret_cast<native::RtlDestroyHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlDestroyHeap")));
                         if (fRtlDestroyHeap)
                             fRtlDestroyHeap(hHeapHandle);
                     }
@@ -200,14 +200,14 @@ namespace syscall
                 {
                     HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
 
-                    auto fNtAllocate = reinterpret_cast<NtAllocateVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtAllocateVirtualMemory")));
-                    auto fNtProtect = reinterpret_cast<NtProtectVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtProtectVirtualMemory")));
+                    auto fNtAllocate = reinterpret_cast<native::NtAllocateVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtAllocateVirtualMemory")));
+                    auto fNtProtect = reinterpret_cast<native::NtProtectVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtProtectVirtualMemory")));
                     if (!fNtAllocate || !fNtProtect)
                         return false;
 
                     pOutRegion = nullptr;
                     SIZE_T uSize = uRegionSize;
-                    NTSTATUS status = fNtAllocate(NtCurrentProcess(), &pOutRegion, 0, &uSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
+                    NTSTATUS status = fNtAllocate(native::getCurrentProcess(), &pOutRegion, 0, &uSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 
                     if (!NT_SUCCESS(status) || !pOutRegion)
                         return false;
@@ -216,12 +216,12 @@ namespace syscall
 
                     ULONG oldProtection = 0;
                     uSize = uRegionSize;
-                    status = fNtProtect(NtCurrentProcess(), &pOutRegion, &uSize, PAGE_EXECUTE_READ, &oldProtection);
+                    status = fNtProtect(native::getCurrentProcess(), &pOutRegion, &uSize, PAGE_EXECUTE_READ, &oldProtection);
 
                     if (!NT_SUCCESS(status))
                     {
                         uSize = 0;
-                        fNtAllocate(NtCurrentProcess(), &pOutRegion, 0, &uSize, MEM_RELEASE, 0);
+                        fNtAllocate(native::getCurrentProcess(), &pOutRegion, 0, &uSize, MEM_RELEASE, 0);
                         pOutRegion = nullptr;
                         return false;
                     }
@@ -235,11 +235,11 @@ namespace syscall
 
                     if (pRegion)
                     {
-                        auto fNtFree = reinterpret_cast<NtFreeVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtFreeVirtualMemory")));
+                        auto fNtFree = reinterpret_cast<native::NtFreeVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtFreeVirtualMemory")));
                         if (fNtFree)
                         {
                             SIZE_T uSize = 0;
-                            fNtFree(NtCurrentProcess(), &pRegion, &uSize, MEM_RELEASE);
+                            fNtFree(native::getCurrentProcess(), &pRegion, &uSize, MEM_RELEASE);
                         }
                     }
                 }
@@ -734,7 +734,7 @@ namespace syscall
                 if (!initialize())
                 {
                     if constexpr (std::is_same_v<Ret, NTSTATUS>)
-                        return STATUS_UNSUCCESSFUL;
+                        return native::STATUS_UNSUCCESSFUL;
 
                     return Ret{};
                 }
@@ -747,7 +747,8 @@ namespace syscall
             if (it == m_vecParsedSyscalls.end() || it->m_key != syscallId)
             {
                 if constexpr (std::is_same_v<Ret, NTSTATUS>)
-                    return STATUS_PROCEDURE_NOT_FOUND;
+                    return native::STATUS_PROCEDURE_NOT_FOUND;
+
                 return Ret{};
             }
 
@@ -762,7 +763,7 @@ namespace syscall
                 if (!uGadgetCount)
                 {
                     if constexpr (std::is_same_v<Ret, NTSTATUS>)
-                        return STATUS_UNSUCCESSFUL;
+                        return native::STATUS_UNSUCCESSFUL;
                     return Ret{};
                 }
 

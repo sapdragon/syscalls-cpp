@@ -4,7 +4,7 @@
 #include <cstdint>
 #include <cwchar>
 
-namespace crt
+namespace syscall::crt
 {
     template<typename T, size_t N>
     [[nodiscard]] constexpr size_t getCountOf(T(&)[N]) noexcept
@@ -32,6 +32,20 @@ namespace crt
                 d[i] = ucByteValue;
 
             return pDest;
+        }
+
+        inline int compare(const void* pBuffer1, const void* pBuffer2, size_t uCount) noexcept
+        {
+            const auto* s1 = static_cast<const unsigned char*>(pBuffer1);
+            const auto* s2 = static_cast<const unsigned char*>(pBuffer2);
+
+            for (size_t i = 0; i < uCount; ++i)
+            {
+                if (s1[i] != s2[i])
+                    return s1[i] - s2[i];
+            }
+
+            return 0;
         }
     }
 

@@ -7,7 +7,7 @@
 #include <cstdint>
 #include <cwchar>
 
-namespace native
+namespace syscall::native
 {
     inline PPEB getCurrentPEB()
     {
@@ -47,7 +47,7 @@ namespace native
 
         while (pCurrentEntry != pListHead)
         {
-            auto pEntry = reinterpret_cast<SHARED_LDR_DATA_TABLE_ENTRY*>(CONTAINING_RECORD(pCurrentEntry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks));
+            auto pEntry = CONTAINING_RECORD(pCurrentEntry, native::LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks);
             if (pEntry->BaseDllName.Buffer && crt::string::compareIgnoreCase(pEntry->BaseDllName.Buffer, wzModuleName) == 0)
                 return reinterpret_cast<HMODULE>(pEntry->DllBase);
 
@@ -68,7 +68,7 @@ namespace native
 
         while (pCurrentEntry != pListHead)
         {
-            auto pEntry = reinterpret_cast<SHARED_LDR_DATA_TABLE_ENTRY*>(CONTAINING_RECORD(pCurrentEntry, LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks));
+            auto pEntry = CONTAINING_RECORD(pCurrentEntry, native::LDR_DATA_TABLE_ENTRY, InMemoryOrderLinks);
             if (pEntry->BaseDllName.Buffer && calculateHashRuntimeCi(pEntry->BaseDllName.Buffer) == uModuleHash)
                 return reinterpret_cast<HMODULE>(pEntry->DllBase);
 

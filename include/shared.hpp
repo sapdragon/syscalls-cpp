@@ -1,130 +1,111 @@
-#ifndef _SHARED_HPP_
-#define _SHARED_HPP_
+#ifndef _SYSCALL_SHARED_HPP_
+#define _SYSCALL_SHARED_HPP_
 
+#define WIN32_LEAN_AND_MEAN
+#define NOMINMAX
 #include <Windows.h>
 #include <winternl.h>
 
-#define NT_SUCCESS(Status) (((NTSTATUS)(Status)) >= 0)
-#define STATUS_SUCCESS 0x00000000
-
-#ifndef NtCurrentProcess
-#define NtCurrentProcess() ((HANDLE)-1)
-#endif
-
-#ifndef SEC_NO_CHANGE
-#define SEC_NO_CHANGE 0x00400000
-#endif
-
-#ifndef STATUS_UNSUCCESSFUL
-#define STATUS_UNSUCCESSFUL 0xC0000001
-#endif
-
-#ifndef STATUS_PROCEDURE_NOT_FOUND
-#define STATUS_PROCEDURE_NOT_FOUND 0xC000007A
-#endif
-
-#ifndef ViewShare
-typedef enum _SECTION_INHERIT {
-    ViewShare = 1,
-    ViewUnmap = 2
-} SECTION_INHERIT;
-#endif
-
-using NtCreateSection_t = NTSTATUS(NTAPI*)(
-    PHANDLE SectionHandle,
-    ACCESS_MASK DesiredAccess,
-    PVOID ObjectAttributes,
-    PLARGE_INTEGER MaximumSize,
-    ULONG SectionPageProtection,
-    ULONG AllocationAttributes,
-    HANDLE FileHandle
-    );
-
-using NtMapViewOfSection_t = NTSTATUS(NTAPI*)(
-    HANDLE SectionHandle,
-    HANDLE ProcessHandle,
-    PVOID* BaseAddress,
-    ULONG_PTR ZeroBits,
-    SIZE_T CommitSize,
-    PLARGE_INTEGER SectionOffset,
-    PSIZE_T ViewSize,
-    DWORD InheritDisposition,
-    ULONG AllocationType,
-    ULONG Win32Protect
-    );
-
-using NtUnmapViewOfSection_t = NTSTATUS(NTAPI*)(
-    HANDLE ProcessHandle,
-    PVOID BaseAddress
-    );
-
-typedef NTSTATUS(NTAPI* NtAllocateVirtualMemory_t)(
-    IN HANDLE ProcessHandle,
-    IN OUT PVOID* BaseAddress,
-    IN ULONG_PTR ZeroBits,
-    IN OUT PSIZE_T RegionSize,
-    IN ULONG AllocationType,
-    IN ULONG Protect
-    );
-
-typedef NTSTATUS(NTAPI* NtProtectVirtualMemory_t)(
-    IN HANDLE ProcessHandle,
-    IN OUT PVOID* BaseAddress,
-    IN OUT PSIZE_T RegionSize,
-    IN ULONG NewProtect,
-    OUT PULONG OldProtect
-    );
-
-typedef NTSTATUS(NTAPI* NtFreeVirtualMemory_t)(
-    IN HANDLE ProcessHandle,
-    IN OUT PVOID* BaseAddress,
-    IN OUT PSIZE_T RegionSize,
-    IN ULONG FreeType
-    );
-
-using RtlCreateHeap_t = PVOID(NTAPI*)(ULONG, PVOID, SIZE_T, SIZE_T, PVOID, PVOID);
-using RtlAllocateHeap_t = PVOID(NTAPI*)(PVOID, ULONG, SIZE_T);
-using RtlDestroyHeap_t = PVOID(NTAPI*)(PVOID);
-using NtCloseHandle_t = NTSTATUS(NTAPI*)(HANDLE);
-
-struct SHARED_LDR_DATA_TABLE_ENTRY
-{
-    struct _LIST_ENTRY InLoadOrderLinks;                                    //0x0
-    struct _LIST_ENTRY InMemoryOrderLinks;                                  //0x10
-    struct _LIST_ENTRY InInitializationOrderLinks;                          //0x20
-    VOID* DllBase;                                                          //0x30
-    VOID* EntryPoint;                                                       //0x38
-    ULONG SizeOfImage;                                                      //0x40
-    struct _UNICODE_STRING FullDllName;                                     //0x48
-    struct _UNICODE_STRING BaseDllName;                                     //0x58
-    ULONG Flags;                                                            //0x68
-    USHORT LoadCount;                                                       //0x6c
-    USHORT TlsIndex;                                                        //0x6e
-    union
-    {
-        struct _LIST_ENTRY HashLinks;                                       //0x70
-        struct
-        {
-            VOID* SectionPointer;                                           //0x70
-            ULONG CheckSum;                                                 //0x78
-        };
-    };
-    union
-    {
-        ULONG TimeDateStamp;                                                //0x80
-        VOID* LoadedImports;                                                //0x80
-    };
-    struct _ACTIVATION_CONTEXT* EntryPointActivationContext;                //0x88
-    VOID* PatchInformation;                                                 //0x90
-    struct _LIST_ENTRY ForwarderLinks;                                      //0x98
-    struct _LIST_ENTRY ServiceTagLinks;                                     //0xa8
-    struct _LIST_ENTRY StaticLinks;                                         //0xb8
-    VOID* ContextInformation;                                               //0xc8
-    ULONGLONG OriginalBase;                                                 //0xd0
-    union _LARGE_INTEGER LoadTime;                                          //0xd8
-};
-
-
 #include "platform.hpp"
 
-#endif  
+namespace syscall::native
+{
+
+    [[nodiscard]] inline constexpr bool isSuccess(NTSTATUS status) noexcept 
+    {
+        return status >= 0;
+    }
+    constexpr NTSTATUS STATUS_SUCCESS = 0x00000000L;
+    constexpr NTSTATUS STATUS_UNSUCCESSFUL = 0xC0000001L;
+    constexpr NTSTATUS STATUS_PROCEDURE_NOT_FOUND = 0xC000007A;
+
+    inline constexpr HANDLE getCurrentProcess() noexcept 
+    {
+        return reinterpret_cast<HANDLE>(-1);
+    }
+
+    enum class ESectionInherit : DWORD 
+    {
+        VIEW_SHARE = 1,
+        VIEW_UNMAP = 2
+    };
+
+    enum class ESectionAllocAttributes : ULONG 
+    {
+        SECTION_COMMIT = SEC_COMMIT,
+        SECTION_IMAGE = SEC_IMAGE,
+        SECTION_IMAGE_NO_EXECUTE = SEC_IMAGE_NO_EXECUTE,
+        SECTION_LARGE_PAGES = SEC_LARGE_PAGES,
+        SECTION_NO_CHANGE = 0x00400000, 
+        SECTION_RESERVE = SEC_RESERVE,
+    };
+
+    struct LDR_DATA_TABLE_ENTRY
+    {
+        LIST_ENTRY InLoadOrderLinks;
+        LIST_ENTRY InMemoryOrderLinks;
+        LIST_ENTRY InInitializationOrderLinks;
+        PVOID DllBase;
+        PVOID EntryPoint;
+        ULONG SizeOfImage;
+        UNICODE_STRING FullDllName;
+        UNICODE_STRING BaseDllName;
+        ULONG Flags;
+        USHORT LoadCount;
+        USHORT TlsIndex;
+        union {
+            LIST_ENTRY HashLinks;
+            struct {
+                PVOID SectionPointer;
+                ULONG CheckSum;
+            };
+        };
+        union {
+            ULONG TimeDateStamp;
+            PVOID LoadedImports;
+        };
+        _ACTIVATION_CONTEXT* EntryPointActivationContext;
+        PVOID PatchInformation;
+        LIST_ENTRY ForwarderLinks;
+        LIST_ENTRY ServiceTagLinks;
+        LIST_ENTRY StaticLinks;
+        PVOID ContextInformation;
+        ULONG_PTR OriginalBase;
+        LARGE_INTEGER LoadTime;
+    };
+
+    using NtCreateSection_t = NTSTATUS(NTAPI*)(
+        PHANDLE SectionHandle, ACCESS_MASK DesiredAccess, POBJECT_ATTRIBUTES ObjectAttributes,
+        PLARGE_INTEGER MaximumSize, ULONG SectionPageProtection, ULONG AllocationAttributes, HANDLE FileHandle
+        );
+
+    using NtMapViewOfSection_t = NTSTATUS(NTAPI*)(
+        HANDLE SectionHandle, HANDLE ProcessHandle, PVOID* BaseAddress,
+        ULONG_PTR ZeroBits, SIZE_T CommitSize, PLARGE_INTEGER SectionOffset,
+        PSIZE_T ViewSize, ESectionInherit InheritDisposition, ULONG AllocationType, ULONG Win32Protect
+        );
+
+    using NtUnmapViewOfSection_t = NTSTATUS(NTAPI*)(HANDLE ProcessHandle, PVOID BaseAddress);
+
+    using NtAllocateVirtualMemory_t = NTSTATUS(NTAPI*)(
+        HANDLE ProcessHandle, PVOID* BaseAddress, ULONG_PTR ZeroBits,
+        PSIZE_T RegionSize, ULONG AllocationType, ULONG Protect
+        );
+
+    using NtProtectVirtualMemory_t = NTSTATUS(NTAPI*)(
+        HANDLE ProcessHandle, PVOID* BaseAddress, PSIZE_T RegionSize,
+        ULONG NewProtect, PULONG OldProtect
+        );
+
+    using NtFreeVirtualMemory_t = NTSTATUS(NTAPI*)(
+        HANDLE ProcessHandle, PVOID* BaseAddress, PSIZE_T RegionSize, ULONG FreeType
+        );
+
+    using NtClose_t = NTSTATUS(NTAPI*)(HANDLE Handle);
+    using RtlCreateHeap_t = PVOID(NTAPI*)(ULONG Flags, PVOID HeapBase, SIZE_T ReserveSize, SIZE_T CommitSize, PVOID Lock, PVOID Parameters);
+    using RtlAllocateHeap_t = PVOID(NTAPI*)(PVOID HeapHandle, ULONG Flags, SIZE_T Size);
+    using RtlDestroyHeap_t = PVOID(NTAPI*)(PVOID HeapHandle);
+
+} // syscall::native
+
+#endif

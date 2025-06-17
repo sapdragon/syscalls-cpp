@@ -471,7 +471,8 @@ namespace syscall
                         if constexpr (platform::isWindows64) 
                             if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C)
                                 uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 4);
-                        else if constexpr (platform::isWindows32) 
+                                
+                        if constexpr (platform::isWindows32) 
                             if (*pFunctionStart == 0xB8)
                                 uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 1);
 
@@ -910,4 +911,4 @@ using SyscallHeapGadget = syscall::Manager<syscall::policies::allocator::heap, s
 #endif
 using SyscallSectionDirect = syscall::Manager<syscall::policies::allocator::section, syscall::policies::generator::direct>;
 
-#endif 
+#endif  

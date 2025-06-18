@@ -18,6 +18,10 @@ You can combine any allocation policy with any stub generation policy.
 | `allocator::heap`    | `HeapCreate` with `HEAP_CREATE_ENABLE_EXECUTE`        |
 | `allocator::memory`    | `NtAllocateVirtualMemory` (`RW` -> `RX`)       |
 
+      
+[![SEC_NO_CHANGE](https://raw.githubusercontent.com/sapdragon/syscalls-cpp/main/docs/images/protection_demo.gif)](https://raw.githubusercontent.com/sapdragon/syscalls-cpp/main/docs/images/protection_demo.gif)
+*Protection demonstration: an attempt to patch a system call located in a section with the `SEC_NO_CHANGE` flag fails.
+
 #### Stub Generation Policies (`IsStubGenerationPolicy`)
 
 | Policy                | Method                                              |

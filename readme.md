@@ -8,7 +8,7 @@ The core principle is **modularity**. You are not given a black box; you are giv
 
 [![SEC_NO_CHANGE](https://raw.githubusercontent.com/sapdragon/syscalls-cpp/refs/heads/main/docs/images/protection_demo.gif)](https://raw.githubusercontent.com/sapdragon/syscalls-cpp/refs/heads/main/docs/images/protection_demo.gif)
 
-*Protection demonstration: an attempt to patch a system call located in a section with the `SEC_NO_CHANGE` flag fails.
+*Allocation demonstration: an attempt to patch a system call located in a section with the `SEC_NO_CHANGE` flag fails.
 
 ## The Building Blocks: Provided Policies
 

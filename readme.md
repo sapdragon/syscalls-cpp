@@ -6,6 +6,10 @@ The core principle is **modularity**. You are not given a black box; you are giv
 
 **The library automatically resolves system call numbers by directly parsing ntdll.dll's metadata. This method is resilient to user-mode hooks by leveraging the PE's structure—the exception directory on x64 and sorted export addresses on x86—and can find adjacent syscalls if a target is patched.**
 
+[![SEC_NO_CHANGE](https://raw.githubusercontent.com/sapdragon/syscalls-cpp/refs/heads/main/docs/images/protection_demo.gif)](https://raw.githubusercontent.com/sapdragon/syscalls-cpp/refs/heads/main/docs/images/protection_demo.gif)
+
+*Protection demonstration: an attempt to patch a system call located in a section with the `SEC_NO_CHANGE` flag fails.
+
 ## The Building Blocks: Provided Policies
 
 You can combine any allocation policy with any stub generation policy.
@@ -18,9 +22,7 @@ You can combine any allocation policy with any stub generation policy.
 | `allocator::heap`    | `HeapCreate` with `HEAP_CREATE_ENABLE_EXECUTE`        |
 | `allocator::memory`    | `NtAllocateVirtualMemory` (`RW` -> `RX`)       |
 
-      
-[![SEC_NO_CHANGE](https://raw.githubusercontent.com/sapdragon/syscalls-cpp/refs/heads/main/docs/images/protection_demo.gif)](https://raw.githubusercontent.com/sapdragon/syscalls-cpp/refs/heads/main/docs/images/protection_demo.gif)
-*Protection demonstration: an attempt to patch a system call located in a section with the `SEC_NO_CHANGE` flag fails.
+    
 
 #### Stub Generation Policies (`IsStubGenerationPolicy`)
 

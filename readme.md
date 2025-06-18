@@ -33,6 +33,18 @@ You can combine any allocation policy with any stub generation policy.
 | `parser::signature` | Scans function prologues for the `mov r10, rcx; mov eax, syscall_id` signature with hooks detection. |
 
 
+## Installation
+
+The recommended way to install and manage the library is through the C++ package manager [vcpkg](https://vcpkg.io/).
+
+```sh
+vcpkg install syscalls-cpp
+```
+
+This command will download, build, and install `syscalls-cpp`, making it easily accessible for your projects with automatic MSBuild and CMake integration.
+
+For manual setup, you can clone this repository and add the `include` directory to your project's include paths.
+
 ## Example: Crafting Your Strategy
 
 The power is in the combination. Here is how you build and use a syscall manager.

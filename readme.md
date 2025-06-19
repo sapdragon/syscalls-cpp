@@ -30,7 +30,7 @@ You can combine any allocation policy with any stub generation policy.
 | --------------------- | ----------------------------------------------------|
 | `generator::direct` | Uses a classic, self-contained `syscall` instruction|
 | `generator::gadget` only | (Only x64) Jumps to a `syscall; ret` gadget found in `ntdll.dll|
-| `generator::exception` | (Only x64) Triggers a breakpoint (`ud2`) to perform the syscall via a custom Vectored Exception Handler (VEH). |
+| `generator::exception` | Triggers a breakpoint (`ud2`) to perform the syscall via a custom Vectored Exception Handler (VEH). |
 
 #### Parsing Policies (`IsSyscallParsingPolicy`)
 | Policy | Method |
@@ -116,6 +116,14 @@ using SuperCustomManager = syscall::Manager<
 >;
 */
 ```
+
+> [!WARNING]\
+> ### `NULL` vs. `nullptr` on x64
+> **always use `nullptr` instead of `NULL`** when invoking syscalls on x64 platforms.
+>
+> The `NULL` macro is often defined as an integer `0` (a 32-bit `int`). Passing it to a syscall expecting a 64-bit pointer can corrupt the stack, as the compiler may treat it as an integer and fail to properly extend it. This leads to argument misalignment and unpredictable crashes.
+>
+> `nullptr` is type-safe and guarantees the correct 64-bit null pointer representation, preventing this subtle but critical bug.
 
 ## Extensibility
 

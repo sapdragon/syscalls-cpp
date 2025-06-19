@@ -116,13 +116,16 @@ namespace syscall
                     LARGE_INTEGER sectionSize;
                     sectionSize.QuadPart = uRegionSize;
 
-                    NTSTATUS status = fNtCreateSection(&hSectionHandle, SECTION_ALL_ACCESS, nullptr, &sectionSize, PAGE_EXECUTE_READWRITE, SEC_COMMIT | static_cast<ULONG>(native::ESectionAllocAttributes::SECTION_NO_CHANGE), nullptr);
+                    using enum native::ESectionInherit;
+                    using enum native::ESectionAllocAttributes;
+
+                    NTSTATUS status = fNtCreateSection(&hSectionHandle, SECTION_ALL_ACCESS, nullptr, &sectionSize, PAGE_EXECUTE_READWRITE, SEC_COMMIT | static_cast<ULONG>(SECTION_NO_CHANGE), nullptr);
                     if (!NT_SUCCESS(status))
                         return false;
 
                     void* pTempView = nullptr;
                     SIZE_T uViewSize = uRegionSize;
-                    status = fNtMapView(hSectionHandle, native::getCurrentProcess(), &pTempView, 0, 0, nullptr, &uViewSize, native::ESectionInherit::VIEW_SHARE, 0, PAGE_READWRITE);
+                    status = fNtMapView(hSectionHandle, native::getCurrentProcess(), &pTempView, 0, 0, nullptr, &uViewSize, VIEW_SHARE, 0, PAGE_READWRITE);
                     if (!NT_SUCCESS(status))
                     {
                         fNtClose(hSectionHandle);
@@ -386,7 +389,7 @@ namespace syscall
                         }
                     }
                     // @note / sapdragon: sorting zw exports
-                    else 
+                    else
                     {
                         auto pFunctionsRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfFunctions);
                         auto pNamesRVA = reinterpret_cast<uint32_t*>(module.m_pModuleBase + module.m_pExportDir->AddressOfNames);
@@ -435,7 +438,7 @@ namespace syscall
                             vecFoundSyscalls.push_back(SyscallEntry_t{ key, uSyscallNumber, 0 });
                         }
                     }
-                    
+
                     return vecFoundSyscalls;
                 }
             };
@@ -468,11 +471,11 @@ namespace syscall
                         uint8_t* pFunctionStart = module.m_pModuleBase + uFunctionRva;
                         uint32_t uSyscallNumber = 0;
 
-                        if constexpr (platform::isWindows64) 
+                        if constexpr (platform::isWindows64)
                             if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C)
                                 uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 4);
-                                
-                        if constexpr (platform::isWindows32) 
+
+                        if constexpr (platform::isWindows32)
                             if (*pFunctionStart == 0xB8)
                                 uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 1);
 
@@ -530,7 +533,7 @@ namespace syscall
                 static bool isFunctionHooked(const uint8_t* pFunctionStart)
                 {
                     const uint8_t* pCurrent = pFunctionStart;
-                        
+
                     while (*pCurrent == 0x90)
                         pCurrent++;
 
@@ -605,14 +608,35 @@ namespace syscall
     };
 
     template<
-        IsIAllocationPolicy IAllocationPolicy,
-        IsStubGenerationPolicy IStubGenerationPolicy,
-        IsSyscallParsingPolicy IFirstParser,
-        IsSyscallParsingPolicy... IFallbackParsers
+        typename IAllocationPolicy,
+        typename IStubGenerationPolicy,
+        typename IFirstParser,
+        typename ... IFallbackParsers
     >
     class ManagerImpl
     {
     private:
+        static_assert(IsIAllocationPolicy<IAllocationPolicy>,
+            "[Syscall] The provided allocation policy is not valid. "
+            "A valid allocation policy must provide two static functions: "
+            "1. 'static bool allocate(size_t, const std::span<const uint8_t>, void*&, HANDLE&);' "
+            "2. 'static void release(void*, HANDLE);'"
+            );
+
+        static_assert(IsStubGenerationPolicy<IStubGenerationPolicy>,
+            "[Syscall] The provided stub generation policy is not valid. "
+            "A valid stub generation policy must provide: "
+            "1. A 'static constexpr bool bRequiresGadget' member. "
+            "2. A 'static constexpr size_t getStubSize()' function. "
+            "3. A 'static void generate(uint8_t*, uint32_t, void*)' function."
+            );
+
+        static_assert(IsSyscallParsingPolicy<IFirstParser> && (IsSyscallParsingPolicy<IFallbackParsers> && ...),
+            "[Syscall] One or more provided syscall parsing policies are not valid. "
+            "A valid parsing policy must provide a static function: "
+            "1. 'static std::vector<SyscallEntry_t> parse(const ModuleInfo_t&);'"
+            );
+
         std::mutex m_mutex;
         std::vector<SyscallEntry_t> m_vecParsedSyscalls;
         void* m_pSyscallRegion = nullptr;
@@ -889,19 +913,20 @@ namespace syscall
     >;
 
     // @note / sapdragon: fucking templates, is that a legal cpp hack? unpack overloads...
-    template<IsIAllocationPolicy AllocPolicy, IsStubGenerationPolicy StubPolicy, typename... ParserArgs>
+    template<typename AllocPolicy, typename StubPolicy, typename... ParserArgs>
     class Manager : public Manager<AllocPolicy, StubPolicy, DefaultParserChain>
     {
     };
 
-    template< IsIAllocationPolicy AllocPolicy, IsStubGenerationPolicy StubPolicy, IsSyscallParsingPolicy... ParsersInChain >
-    class Manager<AllocPolicy, StubPolicy, ParserChain_t<ParsersInChain...>> : public ManagerImpl<AllocPolicy, StubPolicy, ParsersInChain...>
+    template< typename AllocPolicy, typename StubPolicy, IsSyscallParsingPolicy... ParsersInChain >
+    class Manager<AllocPolicy, StubPolicy, ParserChain_t<ParsersInChain...>>
+        : public ManagerImpl<AllocPolicy, StubPolicy, ParsersInChain...>
     {
     };
 
-
-    template< IsIAllocationPolicy AllocPolicy, IsStubGenerationPolicy StubPolicy, IsSyscallParsingPolicy FirstParser, IsSyscallParsingPolicy... FallbackParsers>
-    class Manager<AllocPolicy, StubPolicy, FirstParser, FallbackParsers...> : public ManagerImpl<AllocPolicy, StubPolicy, FirstParser, FallbackParsers...>
+    template< typename AllocPolicy, typename StubPolicy, typename FirstParser, typename... FallbackParsers>
+    class Manager<AllocPolicy, StubPolicy, FirstParser, FallbackParsers...>
+        : public ManagerImpl<AllocPolicy, StubPolicy, FirstParser, FallbackParsers...>
     {
     };
 }

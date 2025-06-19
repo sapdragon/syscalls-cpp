@@ -117,9 +117,9 @@ using SuperCustomManager = syscall::Manager<
 */
 ```
 
-> [!WARNING]\
+> [!WARNING]
 > ### `NULL` vs. `nullptr` on x64
-> **always use `nullptr` instead of `NULL`** when invoking syscalls on x64 platforms.
+> **Always use `nullptr` instead of `NULL`** when invoking syscalls on x64 platforms.
 >
 > The `NULL` macro is often defined as an integer `0` (a 32-bit `int`). Passing it to a syscall expecting a 64-bit pointer can corrupt the stack, as the compiler may treat it as an integer and fail to properly extend it. This leads to argument misalignment and unpredictable crashes.
 >

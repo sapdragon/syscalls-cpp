@@ -20,7 +20,7 @@ namespace syscall::native
 
     inline hashing::Hash_t calculateHashRuntimeCi(const wchar_t* wzData)
     {
-        if (!wzData)
+        if (!wzData || *wzData == L'\0')
             return 0;
 
         hashing::Hash_t hash = hashing::polyKey1;
@@ -28,8 +28,21 @@ namespace syscall::native
 
         while ((wcCurrent = *wzData++))
         {
-            char cAnsiChar = static_cast<char>(crt::string::toLower(wcCurrent));
-            hash ^= static_cast<hashing::Hash_t>(cAnsiChar);
+            wchar_t wcLower = crt::string::toLower(wcCurrent);
+            hash ^= static_cast<hashing::Hash_t>(wcLower);
+            hash += std::rotr(hash, 11) + hashing::polyKey2;
+        }
+        return hash;
+    }
+
+    inline hashing::Hash_t calculateHashSuffix(hashing::Hash_t hash, const char* sSuffix)
+    {
+        if (!sSuffix || *sSuffix == '\0')
+            return hash;
+
+        while (*sSuffix)
+        {
+            hash ^= static_cast<hashing::Hash_t>(*sSuffix++);
             hash += std::rotr(hash, 11) + hashing::polyKey2;
         }
         return hash;
@@ -37,6 +50,9 @@ namespace syscall::native
 
     inline HMODULE getModuleBase(const wchar_t* wzModuleName)
     {
+        if (!wzModuleName || *wzModuleName == L'\0')
+            return nullptr;
+
         auto pPeb = getCurrentPEB();
         if (!pPeb || !pPeb->Ldr)
             return nullptr;
@@ -79,10 +95,10 @@ namespace syscall::native
 
     inline void* getExportAddress(HMODULE hModuleBase, const char* szExportName)
     {
-        if (!hModuleBase || !szExportName)
+        if (!hModuleBase || !szExportName || *szExportName == '\0')
             return nullptr;
 
-        auto pBase = reinterpret_cast<uint8_t*>(hModuleBase);
+        auto pBase = reinterpret_cast<const uint8_t*>(hModuleBase);
         auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(pBase);
         if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
             return nullptr;
@@ -135,7 +151,7 @@ namespace syscall::native
                     return getExportAddress(hForwarderModuleBase, szForwarderFuncName);
                 }
                 else
-                    return pBase + uFunctionRva;
+                    return const_cast<uint8_t*>(pBase) + uFunctionRva;
             }
         }
         return nullptr;
@@ -190,21 +206,12 @@ namespace syscall::native
 
                     wchar_t wzWideDllName[260];
                     crt::string::mbToWcs(wzWideDllName, crt::getCountOf(wzWideDllName), szForwarderDllName);
+
                     hashing::Hash_t uForwarderDllHash = calculateHashRuntimeCi(wzWideDllName);
                     if (!uForwarderDllHash)
                         return nullptr;
 
-                    uForwarderDllHash ^= static_cast<hashing::Hash_t>('.');
-                    uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
-
-                    uForwarderDllHash ^= static_cast<hashing::Hash_t>('d');
-                    uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
-
-                    uForwarderDllHash ^= static_cast<hashing::Hash_t>('l');
-                    uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
-
-                    uForwarderDllHash ^= static_cast<hashing::Hash_t>('l');
-                    uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+                    uForwarderDllHash = calculateHashSuffix(uForwarderDllHash, ".dll");
 
                     HMODULE hForwarderModuleBase = getModuleBase(uForwarderDllHash);
                     if (!hForwarderModuleBase)
@@ -214,7 +221,7 @@ namespace syscall::native
                     return getExportAddress(hForwarderModuleBase, uForwarderFuncHash);
                 }
                 else
-                    return pBase + uFunctionRva;
+                    return const_cast<uint8_t*>(pBase) + uFunctionRva;
             }
         }
         return nullptr;

@@ -42,7 +42,7 @@ namespace syscall::hashing
     consteval Hash_t calculateHash(const char* szData, size_t uLength)
     {
         Hash_t hash = polyKey1;
-        for (size_t i = 0; i < uLength && szData[i]; ++i)
+        for (size_t i = 0; i < uLength; ++i)
         {
             hash ^= static_cast<Hash_t>(szData[i]);
             hash += std::rotr(hash, 11) + polyKey2;
@@ -65,7 +65,7 @@ namespace syscall::hashing
     inline Hash_t calculateHashRuntime(const char* szData, size_t uLength)
     {
         Hash_t hash = polyKey1;
-        for (size_t i = 0; i < uLength && szData[i]; ++i)
+        for (size_t i = 0; i < uLength; ++i)
         {
             hash ^= static_cast<Hash_t>(szData[i]);
             hash += std::rotr(hash, 11) + polyKey2;

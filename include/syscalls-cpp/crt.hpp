@@ -12,52 +12,15 @@ namespace syscall::crt
         return N;
     }
 
-    namespace memory
-    {
-        inline void* copy(void* pDest, const void* pSource, size_t uCount) noexcept
-        {
-            auto* d = static_cast<unsigned char*>(pDest);
-            const auto* s = static_cast<const unsigned char*>(pSource);
-            for (size_t i = 0; i < uCount; ++i)
-                d[i] = s[i];
-
-            return pDest;
-        }
-
-        inline void* set(void* pDest, int iValue, size_t uCount) noexcept
-        {
-            auto* d = static_cast<unsigned char*>(pDest);
-            const unsigned char ucByteValue = static_cast<unsigned char>(iValue);
-            for (size_t i = 0; i < uCount; ++i)
-                d[i] = ucByteValue;
-
-            return pDest;
-        }
-
-        inline int compare(const void* pBuffer1, const void* pBuffer2, size_t uCount) noexcept
-        {
-            const auto* s1 = static_cast<const unsigned char*>(pBuffer1);
-            const auto* s2 = static_cast<const unsigned char*>(pBuffer2);
-
-            for (size_t i = 0; i < uCount; ++i)
-            {
-                if (s1[i] != s2[i])
-                    return s1[i] - s2[i];
-            }
-
-            return 0;
-        }
-    }
-
     namespace string
     {
-        constexpr char toLower(char c) noexcept 
+        constexpr char toLower(char c) noexcept
         {
-            return (c >= 'A' && c <= 'Z') ? (c + ('a' - 'A')) : c; 
+            return (c >= 'A' && c <= 'Z') ? (c + ('a' - 'A')) : c;
         }
-        constexpr wchar_t toLower(wchar_t c) noexcept 
-        { 
-            return (c >= L'A' && c <= L'Z') ? (c + (L'a' - L'A')) : c; 
+        constexpr wchar_t toLower(wchar_t c) noexcept
+        {
+            return (c >= L'A' && c <= L'Z') ? (c + (L'a' - L'A')) : c;
         }
 
         constexpr size_t getLength(const char* szStr) noexcept
@@ -128,7 +91,7 @@ namespace syscall::crt
             const size_t uSourceLength = getLength(src);
 
             const size_t uCount = (uSourceLength < uDestLength) ? uSourceLength : (uDestLength - 1);
-            memory::copy(szDest, src, uCount);
+            std::copy_n(src, uCount, szDest);
             szDest[uCount] = '\0';
         }
 
@@ -146,7 +109,7 @@ namespace syscall::crt
             const size_t uRemainingSpace = uSizeInElements - uDestLength - 1;
             const size_t uCount = (uSourceLength < uRemainingSpace) ? uSourceLength : uRemainingSpace;
 
-            memory::copy(pDest + uDestLength, pSource, uCount * sizeof(wchar_t));
+            std::copy_n(pSource, uCount * sizeof(wchar_t), pDest + uDestLength);
             pDest[uDestLength + uCount] = L'\0';
         }
 

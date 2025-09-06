@@ -1,15 +1,23 @@
 cmake_minimum_required(VERSION 3.15)
 project(syscalls-cpp VERSION 1.0.0 LANGUAGES CXX)
 
+option(SYSCALL_CPP_BUILD_EXAMPLES "Build example executables" ${PROJECT_IS_TOP_LEVEL})
+
 include(GNUInstallDirs)
 
-add_library(syscalls-cpp INTERFACE)
-add_library(sapdragon::syscalls-cpp ALIAS syscalls-cpp)
+add_library(${PROJECT_NAME} INTERFACE)
+add_library(sapdragon::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
 
-target_include_directories(syscalls-cpp INTERFACE
+set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
+
+target_include_directories(${PROJECT_NAME} INTERFACE
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
     $<BUILD_INTERFACE:${CMAKE_CURRENT_SOURCE_DIR}/include>
 )
+
+if (SYSCALL_CPP_BUILD_EXAMPLES)
+    add_subdirectory(examples)
+endif()
 
 file(GLOB HEADER_FILES "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp")
 
@@ -19,13 +27,13 @@ install(
 )
 
 install(
-    TARGETS syscalls-cpp
-    EXPORT syscalls-cpp-targets
+    TARGETS ${PROJECT_NAME}
+    EXPORT ${PROJECT_NAME}-targets
 )
 
 install(
-    EXPORT syscalls-cpp-targets
-    FILE syscalls-cpp-config.cmake
+    EXPORT ${PROJECT_NAME}-targets
+    FILE ${PROJECT_NAME}-config.cmake
     NAMESPACE sapdragon::
-    DESTINATION share/syscalls-cpp
+    DESTINATION share/${PROJECT_NAME}
 )

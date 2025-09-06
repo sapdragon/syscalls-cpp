@@ -144,7 +144,7 @@ namespace syscall
                         return false;
                     }
 
-                    crt::memory::copy(pTempView, vecBuffer.data(), uRegionSize);
+                    std::copy_n(vecBuffer.data(), uRegionSize, static_cast<uint8_t*>(pTempView));
                     fNtUnmapView(native::getCurrentProcess(), pTempView);
                     uViewSize = uRegionSize;
                     status = fNtMapView(hSectionHandle, native::getCurrentProcess(), &pOutRegion, 0, 0, nullptr, &uViewSize, native::ESectionInherit::VIEW_SHARE, 0, PAGE_EXECUTE_READ);
@@ -190,7 +190,7 @@ namespace syscall
                         return false;
                     }
 
-                    crt::memory::copy(pOutRegion, vecBuffer.data(), uRegionSize);
+                    std::copy_n(vecBuffer.data(), uRegionSize, static_cast<uint8_t*>(pOutRegion));
                     return true;
                 }
 
@@ -227,8 +227,7 @@ namespace syscall
                     if (!NT_SUCCESS(status) || !pOutRegion)
                         return false;
 
-                    crt::memory::copy(pOutRegion, vecBuffer.data(), uRegionSize);
-
+                    std::copy_n(vecBuffer.data(), uRegionSize, static_cast<uint8_t*>(pOutRegion));
                     ULONG oldProtection = 0;
                     uSize = uRegionSize;
                     status = fNtProtect(native::getCurrentProcess(), &pOutRegion, &uSize, PAGE_EXECUTE_READ, &oldProtection);
@@ -304,7 +303,7 @@ namespace syscall
                     pBuffer[0] = 0x0F;
                     pBuffer[1] = 0x0B;
                     pBuffer[2] = 0xC3;
-                    crt::memory::set(pBuffer + 3, 0x90, getStubSize() - 3);
+                    std::fill_n(pBuffer + 3, getStubSize() - 3, 0x90);
                 }
             };
 
@@ -333,8 +332,7 @@ namespace syscall
 #endif
                 static void generate(uint8_t* pBuffer, uint32_t uSyscallNumber, void* /*pGadgetAddress*/)
                 {
-                    crt::memory::copy(pBuffer, arrShellcode.data(), arrShellcode.size());
-
+                    std::copy_n(arrShellcode.data(), arrShellcode.size(), pBuffer);
                     if constexpr (platform::isWindows64)
                         *reinterpret_cast<uint32_t*>(pBuffer + 4) = uSyscallNumber;
                     else

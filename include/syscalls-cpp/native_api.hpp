@@ -2,8 +2,8 @@
 #define NATIVE_API_HPP
 
 #include "shared.hpp"
-#include "hash.hpp"
 #include "crt.hpp"
+#include "hash.hpp"
 #include <cstdint>
 #include <cwchar>
 

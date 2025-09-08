@@ -115,7 +115,7 @@ namespace syscall::crt
 
         inline void mbToWcs(wchar_t* pDest, size_t uSizeInElements, const char* pSource) noexcept
         {
-            if (!pDest || uSizeInElements)
+            if (!pDest || uSizeInElements == 0)
                 return;
 
             const size_t uSourceLength = getLength(pSource);

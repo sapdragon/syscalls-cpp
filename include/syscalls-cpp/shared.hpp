@@ -11,7 +11,7 @@
 namespace syscall::native
 {
 
-    [[nodiscard]] inline constexpr bool isSuccess(NTSTATUS status) noexcept 
+    [[nodiscard]] constexpr bool isSuccess(NTSTATUS status) noexcept
     {
         return status >= 0;
     }
@@ -19,7 +19,8 @@ namespace syscall::native
     constexpr NTSTATUS STATUS_UNSUCCESSFUL = 0xC0000001L;
     constexpr NTSTATUS STATUS_PROCEDURE_NOT_FOUND = 0xC000007A;
 
-    inline constexpr HANDLE getCurrentProcess() noexcept 
+    [[nodiscard]]
+    constexpr HANDLE getCurrentProcess() noexcept
     {
         return reinterpret_cast<HANDLE>(-1);
     }

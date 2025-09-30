@@ -113,8 +113,7 @@ namespace syscall::native
                 if (uFunctionRva >= uExportSectionStart && uFunctionRva < uExportSectionEnd)
                 {
                     char szForwarderString[256];
-                    crt::string::copy(szForwarderString, sizeof(szForwarderString), reinterpret_cast<const char*>(pBase + uFunctionRva));
-
+                    std::copy_n(reinterpret_cast<const char*>(pBase + uFunctionRva), sizeof(szForwarderString), szForwarderString);
                     char* szSeparator = crt::string::findChar(szForwarderString, '.');
                     if (!szSeparator)
                         return nullptr;
@@ -178,8 +177,7 @@ namespace syscall::native
                 if (uFunctionRva >= uExportSectionStart && uFunctionRva < uExportSectionEnd)
                 {
                     char szForwarderString[256];
-                    crt::string::copy(szForwarderString, sizeof(szForwarderString), reinterpret_cast<const char*>(pBase + uFunctionRva));
-
+                    std::copy_n(reinterpret_cast<const char*>(pBase + uFunctionRva), sizeof(szForwarderString), szForwarderString);
                     char* szSeparator = crt::string::findChar(szForwarderString, '.');
                     if (!szSeparator)
                         return nullptr;

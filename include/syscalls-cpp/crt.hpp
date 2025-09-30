@@ -43,17 +43,6 @@ namespace syscall::crt
             return s - wzStr;
         }
 
-        [[nodiscard]] constexpr int compare(const char* szFirst, const char* szSecond) noexcept
-        {
-            while (*szFirst && (*szFirst == *szSecond)) 
-            {
-                szFirst++; 
-                szSecond++; 
-            }
-
-            return *(const unsigned char*)szFirst - *(const unsigned char*)szSecond;
-        }
-
         [[nodiscard]] constexpr int compareIgnoreCase(const wchar_t* szFirst, const wchar_t* szSecond) noexcept
         {
             wchar_t c1, c2;
@@ -66,23 +55,6 @@ namespace syscall::crt
             } while (c1 == c2);
 
             return c1 - c2;
-        }
-
-        [[nodiscard]] constexpr const char* findChar(const char* str, int character) noexcept
-        {
-            while (*str != '\0') 
-            {
-                if (*str == static_cast<char>(character)) 
-                    return str;
-
-                str++;
-            }
-            return nullptr;
-        }
-
-        [[nodiscard]] inline char* findChar(char* str, int character) noexcept
-        {
-            return const_cast<char*>(findChar(static_cast<const char*>(str), character));
         }
 
         inline void concat(wchar_t* pDest, size_t uSizeInElements, const wchar_t* pSource) noexcept

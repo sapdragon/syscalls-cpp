@@ -101,41 +101,43 @@ namespace syscall::native
 
         for (uint32_t i = 0; i < pExportDir->NumberOfNames; ++i)
         {
-            const char* szCurrentProcName = reinterpret_cast<const char*>(pBase + pNamesRVA[i]);
+            auto szCurrentProcName = reinterpret_cast<const char*>(pBase + pNamesRVA[i]);
 
-            if (crt::string::compare(szCurrentProcName, szExportName) == 0)
-            {
-                uint16_t usOrdinal = pOrdinalsRVA[i];
-                uint32_t uFunctionRva = pFunctionsRVA[usOrdinal];
-                auto uExportSectionStart = uExportDirRva;
-                auto uExportSectionEnd = uExportSectionStart + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
+            if (std::string_view{szCurrentProcName} != std::string_view{szExportName})
+                continue;
 
-                if (uFunctionRva >= uExportSectionStart && uFunctionRva < uExportSectionEnd)
-                {
-                    char szForwarderString[256];
-                    std::copy_n(reinterpret_cast<const char*>(pBase + uFunctionRva), sizeof(szForwarderString), szForwarderString);
-                    char* szSeparator = crt::string::findChar(szForwarderString, '.');
-                    if (!szSeparator)
-                        return nullptr;
+            const uint16_t usOrdinal = pOrdinalsRVA[i];
+            const uint32_t uFunctionRva = pFunctionsRVA[usOrdinal];
+            auto uExportSectionStart = uExportDirRva;
+            auto uExportSectionEnd = uExportSectionStart + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
-                    *szSeparator = '\0';
-                    char* szForwarderFuncName = szSeparator + 1;
-                    char* szForwarderDllName = szForwarderString;
+            if (uFunctionRva < uExportSectionStart || uFunctionRva > uExportSectionEnd)
+                return pBase + uFunctionRva;
 
-                    wchar_t wzWideDllName[260];
+            char szForwarderString[256];
+            std::copy_n(
+                reinterpret_cast<const char *>(pBase + uFunctionRva),
+                sizeof(szForwarderString), szForwarderString);
 
-                    crt::string::mbToWcs(wzWideDllName, crt::getCountOf(wzWideDllName), szForwarderDllName);
-                    crt::string::concat(wzWideDllName, crt::getCountOf(wzWideDllName), L".dll");
+            const auto szSeparator = std::ranges::find(szForwarderString, '.');
+            if (szSeparator == std::cend(szForwarderString))
+                return nullptr;
 
-                    HMODULE hForwarderModuleBase = getModuleBase(wzWideDllName);
-                    if (!hForwarderModuleBase)
-                        return nullptr;
+            *szSeparator = '\0';
+            char* szForwarderFuncName = szSeparator + 1;
+            char* szForwarderDllName = szForwarderString;
 
-                    return getExportAddress(hForwarderModuleBase, szForwarderFuncName);
-                }
-                else
-                    return pBase + uFunctionRva;
-            }
+            wchar_t wzWideDllName[260];
+
+            crt::string::mbToWcs(wzWideDllName, crt::getCountOf(wzWideDllName), szForwarderDllName);
+            crt::string::concat(wzWideDllName, crt::getCountOf(wzWideDllName),
+                                L".dll");
+
+            const HMODULE hForwarderModuleBase = getModuleBase(wzWideDllName);
+            if (!hForwarderModuleBase)
+                return nullptr;
+
+            return getExportAddress(hForwarderModuleBase, szForwarderFuncName);
         }
         return nullptr;
     }
@@ -167,53 +169,55 @@ namespace syscall::native
         {
             const char* szCurrentProcName = reinterpret_cast<const char*>(pBase + pNamesRVA[i]);
 
-            if (hashing::calculateHashRuntime(szCurrentProcName) == uExportHash)
-            {
-                uint16_t usOrdinal = pOrdinalsRVA[i];
-                uint32_t uFunctionRva = pFunctionsRVA[usOrdinal];
-                auto uExportSectionStart = uExportDirRva;
-                auto uExportSectionEnd = uExportSectionStart + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
+            if (hashing::calculateHashRuntime(szCurrentProcName) != uExportHash)
+                continue;
 
-                if (uFunctionRva >= uExportSectionStart && uFunctionRva < uExportSectionEnd)
-                {
-                    char szForwarderString[256];
-                    std::copy_n(reinterpret_cast<const char*>(pBase + uFunctionRva), sizeof(szForwarderString), szForwarderString);
-                    char* szSeparator = crt::string::findChar(szForwarderString, '.');
-                    if (!szSeparator)
-                        return nullptr;
+            uint16_t usOrdinal = pOrdinalsRVA[i];
+            uint32_t uFunctionRva = pFunctionsRVA[usOrdinal];
+            auto uExportSectionStart = uExportDirRva;
+            auto uExportSectionEnd = uExportSectionStart + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
-                    *szSeparator = '\0';
-                    char* szForwarderFuncName = szSeparator + 1;
-                    char* szForwarderDllName = szForwarderString;
+            if (uFunctionRva < uExportSectionStart ||
+                uFunctionRva > uExportSectionEnd)
+              return pBase + uFunctionRva;
 
-                    wchar_t wzWideDllName[260];
-                    crt::string::mbToWcs(wzWideDllName, crt::getCountOf(wzWideDllName), szForwarderDllName);
-                    hashing::Hash_t uForwarderDllHash = calculateHashRuntimeCi(wzWideDllName);
-                    if (!uForwarderDllHash)
-                        return nullptr;
+            char szForwarderString[256];
+            std::copy_n(reinterpret_cast<const char *>(pBase + uFunctionRva), sizeof(szForwarderString), szForwarderString);
+            const auto szSeparator = std::ranges::find(szForwarderString, '.');
 
-                    uForwarderDllHash ^= static_cast<hashing::Hash_t>('.');
-                    uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+            if (szSeparator == std::cend(szForwarderString))
+              return nullptr;
 
-                    uForwarderDllHash ^= static_cast<hashing::Hash_t>('d');
-                    uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+            *szSeparator = '\0';
+            char *szForwarderFuncName = szSeparator + 1;
+            char *szForwarderDllName = szForwarderString;
 
-                    uForwarderDllHash ^= static_cast<hashing::Hash_t>('l');
-                    uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+            wchar_t wzWideDllName[260];
+            crt::string::mbToWcs(wzWideDllName, crt::getCountOf(wzWideDllName), szForwarderDllName);
+            hashing::Hash_t uForwarderDllHash = calculateHashRuntimeCi(wzWideDllName);
+            
+            if (!uForwarderDllHash)
+              return nullptr;
 
-                    uForwarderDllHash ^= static_cast<hashing::Hash_t>('l');
-                    uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+            uForwarderDllHash ^= static_cast<hashing::Hash_t>('.');
+            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
 
-                    HMODULE hForwarderModuleBase = getModuleBase(uForwarderDllHash);
-                    if (!hForwarderModuleBase)
-                        return nullptr;
+            uForwarderDllHash ^= static_cast<hashing::Hash_t>('d');
+            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
 
-                    hashing::Hash_t uForwarderFuncHash = hashing::calculateHashRuntime(szForwarderFuncName);
-                    return getExportAddress(hForwarderModuleBase, uForwarderFuncHash);
-                }
-                else
-                    return pBase + uFunctionRva;
-            }
+            uForwarderDllHash ^= static_cast<hashing::Hash_t>('l');
+            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+
+            uForwarderDllHash ^= static_cast<hashing::Hash_t>('l');
+            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+
+            HMODULE hForwarderModuleBase = getModuleBase(uForwarderDllHash);
+
+            if (!hForwarderModuleBase)
+              return nullptr;
+
+            hashing::Hash_t uForwarderFuncHash = hashing::calculateHashRuntime(szForwarderFuncName);
+            return getExportAddress(hForwarderModuleBase, uForwarderFuncHash);
         }
         return nullptr;
     }

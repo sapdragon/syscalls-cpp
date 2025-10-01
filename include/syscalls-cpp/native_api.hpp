@@ -117,7 +117,7 @@ namespace syscall::native
             char szForwarderString[256];
             std::copy_n(
                 reinterpret_cast<const char *>(pBase + uFunctionRva),
-                sizeof(szForwarderString), szForwarderString);
+                sizeof(szForwarderString)-1, szForwarderString);
 
             const auto szSeparator = std::ranges::find(szForwarderString, '.');
             if (szSeparator == std::cend(szForwarderString))
@@ -182,7 +182,7 @@ namespace syscall::native
               return pBase + uFunctionRva;
 
             char szForwarderString[256];
-            std::copy_n(reinterpret_cast<const char *>(pBase + uFunctionRva), sizeof(szForwarderString), szForwarderString);
+            std::copy_n(reinterpret_cast<const char *>(pBase + uFunctionRva), sizeof(szForwarderString)-1, szForwarderString);
             const auto szSeparator = std::ranges::find(szForwarderString, '.');
 
             if (szSeparator == std::cend(szForwarderString))

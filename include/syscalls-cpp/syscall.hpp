@@ -388,7 +388,7 @@ namespace syscall
                                 if (hashing::calculateHashRuntime(szName, 2) == hashing::calculateHash("Zw"))
                                 {
                                     char szNtName[128];
-                                    std::copy_n(szName, sizeof(szNtName), szNtName);
+                                    std::copy_n(szName, sizeof(szNtName)-1, szNtName);
                                     szNtName[0] = 'N';
                                     szNtName[1] = 't';
 
@@ -439,7 +439,7 @@ namespace syscall
                         for (const auto& [_, szName] : vecZwFunctions) 
                         {
                             char szNtName[128];
-                            std::copy_n(szName, sizeof(szNtName), szNtName);
+                            std::copy_n(szName, sizeof(szNtName)-1, szNtName);
                             szNtName[0] = 'N';
                             szNtName[1] = 't';
 

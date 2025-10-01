@@ -111,7 +111,7 @@ namespace syscall::native
             auto uExportSectionStart = uExportDirRva;
             auto uExportSectionEnd = uExportSectionStart + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
-            if (uFunctionRva < uExportSectionStart || uFunctionRva > uExportSectionEnd)
+            if (uFunctionRva < uExportSectionStart || uFunctionRva >= uExportSectionEnd)
                 return pBase + uFunctionRva;
 
             char szForwarderString[256];
@@ -178,7 +178,7 @@ namespace syscall::native
             auto uExportSectionEnd = uExportSectionStart + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
             if (uFunctionRva < uExportSectionStart ||
-                uFunctionRva > uExportSectionEnd)
+                uFunctionRva >= uExportSectionEnd)
               return pBase + uFunctionRva;
 
             char szForwarderString[256];

@@ -14,15 +14,17 @@ namespace syscall::crt
 
     namespace string
     {
+        [[nodiscard]]
         constexpr char toLower(char c) noexcept
         {
             return (c >= 'A' && c <= 'Z') ? (c + ('a' - 'A')) : c;
         }
+        [[nodiscard]]
         constexpr wchar_t toLower(wchar_t c) noexcept
         {
             return (c >= L'A' && c <= L'Z') ? (c + (L'a' - L'A')) : c;
         }
-
+        [[nodiscard]]
         constexpr size_t getLength(const char* szStr) noexcept
         {
             const char* s = szStr;
@@ -31,7 +33,7 @@ namespace syscall::crt
 
             return s - szStr;
         }
-
+        [[nodiscard]]
         constexpr size_t getLength(const wchar_t* wzStr) noexcept
         {
             const wchar_t* s = wzStr;
@@ -39,17 +41,6 @@ namespace syscall::crt
                 ++s;
 
             return s - wzStr;
-        }
-
-        [[nodiscard]] constexpr int compare(const char* szFirst, const char* szSecond) noexcept
-        {
-            while (*szFirst && (*szFirst == *szSecond)) 
-            {
-                szFirst++; 
-                szSecond++; 
-            }
-
-            return *(const unsigned char*)szFirst - *(const unsigned char*)szSecond;
         }
 
         [[nodiscard]] constexpr int compareIgnoreCase(const wchar_t* szFirst, const wchar_t* szSecond) noexcept
@@ -64,35 +55,6 @@ namespace syscall::crt
             } while (c1 == c2);
 
             return c1 - c2;
-        }
-
-        [[nodiscard]] constexpr const char* findChar(const char* str, int character) noexcept
-        {
-            while (*str != '\0') 
-            {
-                if (*str == static_cast<char>(character)) 
-                    return str;
-
-                str++;
-            }
-            return nullptr;
-        }
-
-        [[nodiscard]] inline char* findChar(char* str, int character) noexcept
-        {
-            return const_cast<char*>(findChar(static_cast<const char*>(str), character));
-        }
-
-        inline void copy(char* szDest, size_t uDestLength, const char* src) noexcept
-        {
-            if (!szDest || !uDestLength)
-                return;
-
-            const size_t uSourceLength = getLength(src);
-
-            const size_t uCount = (uSourceLength < uDestLength) ? uSourceLength : (uDestLength - 1);
-            std::copy_n(src, uCount, szDest);
-            szDest[uCount] = '\0';
         }
 
         inline void concat(wchar_t* pDest, size_t uSizeInElements, const wchar_t* pSource) noexcept

@@ -15,12 +15,9 @@ namespace syscall::native
     {
         return status >= 0;
     }
-    constexpr NTSTATUS STATUS_SUCCESS = 0x00000000L;
-    constexpr NTSTATUS STATUS_UNSUCCESSFUL = 0xC0000001L;
-    constexpr NTSTATUS STATUS_PROCEDURE_NOT_FOUND = 0xC000007A;
 
-    [[nodiscard]]
-    constexpr HANDLE getCurrentProcess() noexcept
+    
+    [[nodiscard]] constexpr HANDLE getCurrentProcess() noexcept
     {
         return reinterpret_cast<HANDLE>(-1);
     }
@@ -106,6 +103,10 @@ namespace syscall::native
     using RtlCreateHeap_t = PVOID(NTAPI*)(ULONG Flags, PVOID HeapBase, SIZE_T ReserveSize, SIZE_T CommitSize, PVOID Lock, PVOID Parameters);
     using RtlAllocateHeap_t = PVOID(NTAPI*)(PVOID HeapHandle, ULONG Flags, SIZE_T Size);
     using RtlDestroyHeap_t = PVOID(NTAPI*)(PVOID HeapHandle);
+
+    constexpr NTSTATUS STATUS_SUCCESS = 0x00000000L;
+    constexpr NTSTATUS STATUS_UNSUCCESSFUL = 0xC0000001L;
+    constexpr NTSTATUS STATUS_PROCEDURE_NOT_FOUND = 0xC000007A;
 
 } // syscall::native
 

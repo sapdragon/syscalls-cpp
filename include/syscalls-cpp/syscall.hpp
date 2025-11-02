@@ -480,19 +480,29 @@ namespace syscall
 
                         uint8_t* pFunctionStart = module.m_pModuleBase + uFunctionRva;
                         uint32_t uSyscallNumber = 0;
+                        bool bSyscallFound = false;
 
                         if constexpr (platform::isWindows64)
+                        {
                             if (*reinterpret_cast<uint32_t*>(pFunctionStart) == 0xB8D18B4C)
+                            {
                                 uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 4);
+                                bSyscallFound = true;
+                            }
+                        }
 
                         if constexpr (platform::isWindows32)
+                        {
                             if (*pFunctionStart == 0xB8)
+                            {
                                 uSyscallNumber = *reinterpret_cast<uint32_t*>(pFunctionStart + 1);
-
+                                bSyscallFound = true;
+                            }
+                        }
                         // @note / SapDragon: checks hooks on x64
                         if constexpr (platform::isWindows64)
                         {
-                            if (isFunctionHooked(pFunctionStart) && !uSyscallNumber)
+                            if (isFunctionHooked(pFunctionStart) && !bSyscallFound)
                             {
                                 // @note / SapDragon: stable only on x64
 
@@ -505,12 +515,13 @@ namespace syscall
                                     {
                                         uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
                                         uSyscallNumber = uNeighborSyscall + j;
+                                        bSyscallFound = true;
                                         break;
                                     }
                                 }
 
                                 // @note / SapDragon: search down
-                                if (!uSyscallNumber)
+                                if (!bSyscallFound)
                                 {
                                     for (int j = 1; j < 20; ++j)
                                     {
@@ -520,6 +531,7 @@ namespace syscall
                                         {
                                             uint32_t uNeighborSyscall = *reinterpret_cast<uint32_t*>(pNeighborFunc + 4);
                                             uSyscallNumber = uNeighborSyscall - j;
+                                            bSyscallFound = true;
                                             break;
                                         }
                                     }
@@ -527,7 +539,7 @@ namespace syscall
                             }
                         }
 
-                        if (uSyscallNumber)
+                        if (bSyscallFound)
                         {
                             const SyscallKey_t key = SYSCALL_ID_RT(szName);
                             vecFoundSyscalls.push_back(SyscallEntry_t{

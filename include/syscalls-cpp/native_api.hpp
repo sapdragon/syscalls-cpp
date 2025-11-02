@@ -126,14 +126,28 @@ namespace syscall::native
             *szSeparator = '\0';
             char* szForwarderFuncName = szSeparator + 1;
             char* szForwarderDllName = szForwarderString;
+            hashing::Hash_t uForwarderDllHash = hashing::polyKey1;
 
-            wchar_t wzWideDllName[260];
+            for (const char* pChar = szForwarderDllName; *pChar; ++pChar)
+            {
+                char cLower = crt::string::toLower(*pChar);
+                uForwarderDllHash ^= static_cast<hashing::Hash_t>(cLower);
+                uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+            }
 
-            crt::string::mbToWcs(wzWideDllName, crt::getCountOf(wzWideDllName), szForwarderDllName);
-            crt::string::concat(wzWideDllName, crt::getCountOf(wzWideDllName),
-                                L".dll");
+            uForwarderDllHash ^= static_cast<hashing::Hash_t>('.');
+            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
 
-            const HMODULE hForwarderModuleBase = getModuleBase(wzWideDllName);
+            uForwarderDllHash ^= static_cast<hashing::Hash_t>('d');
+            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+
+            uForwarderDllHash ^= static_cast<hashing::Hash_t>('l');
+            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+
+            uForwarderDllHash ^= static_cast<hashing::Hash_t>('l');
+            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+
+            const HMODULE hForwarderModuleBase = getModuleBase(uForwarderDllHash);
             if (!hForwarderModuleBase)
                 return nullptr;
 

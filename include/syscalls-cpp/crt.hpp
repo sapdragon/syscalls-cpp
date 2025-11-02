@@ -14,18 +14,17 @@ namespace syscall::crt
 
     namespace string
     {
-        [[nodiscard]]
-        constexpr char toLower(char c) noexcept
+        [[nodiscard]] constexpr char toLower(char c) noexcept
         {
             return (c >= 'A' && c <= 'Z') ? (c + ('a' - 'A')) : c;
         }
-        [[nodiscard]]
-        constexpr wchar_t toLower(wchar_t c) noexcept
+        
+        [[nodiscard]] constexpr wchar_t toLower(wchar_t c) noexcept
         {
             return (c >= L'A' && c <= L'Z') ? (c + (L'a' - L'A')) : c;
         }
-        [[nodiscard]]
-        constexpr size_t getLength(const char* szStr) noexcept
+        
+        [[nodiscard]] constexpr size_t getLength(const char* szStr) noexcept
         {
             const char* s = szStr;
             while (*s) 
@@ -33,8 +32,8 @@ namespace syscall::crt
 
             return s - szStr;
         }
-        [[nodiscard]]
-        constexpr size_t getLength(const wchar_t* wzStr) noexcept
+        
+        [[nodiscard]] constexpr size_t getLength(const wchar_t* wzStr) noexcept
         {
             const wchar_t* s = wzStr;
             while (*s) 

@@ -7,8 +7,7 @@ include(GNUInstallDirs)
 
 add_library(${PROJECT_NAME} INTERFACE)
 add_library(sapdragon::${PROJECT_NAME} ALIAS ${PROJECT_NAME})
-
-set_target_properties(${PROJECT_NAME} PROPERTIES CXX_STANDARD 20)
+target_compile_features(${PROJECT_NAME} INTERFACE cxx_std_20)
 
 target_include_directories(${PROJECT_NAME} INTERFACE
     $<INSTALL_INTERFACE:${CMAKE_INSTALL_INCLUDEDIR}>
@@ -19,11 +18,10 @@ if (SYSCALL_CPP_BUILD_EXAMPLES)
     add_subdirectory(examples)
 endif()
 
-file(GLOB HEADER_FILES "${CMAKE_CURRENT_SOURCE_DIR}/include/*.hpp")
-
 install(
-    FILES ${HEADER_FILES}
+    DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/
     DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
+    FILES_MATCHING PATTERN "*.hpp"
 )
 
 install(

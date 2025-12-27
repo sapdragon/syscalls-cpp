@@ -49,6 +49,15 @@ vcpkg install syscalls-cpp
 
 This command will download, build, and install `syscalls-cpp`, making it easily accessible for your projects with automatic MSBuild and CMake integration.
 
+### Conan
+
+You can also use [Conan](https://conan.io/). Add the following to your `conanfile.txt`:
+
+```ini
+[requires]
+syscalls-cpp/1.2.0
+```
+
 For manual setup, you can clone this repository and add the `include` directory to your project's include paths.
 
 ## Example: Crafting Your Strategy

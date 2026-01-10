@@ -1,15 +1,18 @@
 #ifndef SYSCALL_CRT_HPP
 #define SYSCALL_CRT_HPP
 
+#include <algorithm>
 #include <cstdint>
 #include <cwchar>
+#include <string>
+#include <iterator>
 
 namespace syscall::crt
 {
     template<typename T, size_t N>
-    [[nodiscard]] constexpr size_t getCountOf(T(&)[N]) noexcept
+    [[nodiscard]] constexpr size_t getCountOf(T(&arr)[N]) noexcept
     {
-        return N;
+        return std::size(arr);
     }
 
     namespace string
@@ -18,28 +21,20 @@ namespace syscall::crt
         {
             return (c >= 'A' && c <= 'Z') ? (c + ('a' - 'A')) : c;
         }
-        
+
         [[nodiscard]] constexpr wchar_t toLower(wchar_t c) noexcept
         {
             return (c >= L'A' && c <= L'Z') ? (c + (L'a' - L'A')) : c;
         }
-        
+
         [[nodiscard]] constexpr size_t getLength(const char* szStr) noexcept
         {
-            const char* s = szStr;
-            while (*s) 
-                ++s;
-
-            return s - szStr;
+            return std::char_traits<char>::length(szStr);
         }
-        
+
         [[nodiscard]] constexpr size_t getLength(const wchar_t* wzStr) noexcept
         {
-            const wchar_t* s = wzStr;
-            while (*s) 
-                ++s;
-
-            return s - wzStr;
+            return std::char_traits<wchar_t>::length(wzStr);
         }
 
         [[nodiscard]] constexpr int compareIgnoreCase(const wchar_t* szFirst, const wchar_t* szSecond) noexcept
@@ -70,7 +65,7 @@ namespace syscall::crt
             const size_t uRemainingSpace = uSizeInElements - uDestLength - 1;
             const size_t uCount = (uSourceLength < uRemainingSpace) ? uSourceLength : uRemainingSpace;
 
-            std::copy_n(pSource, uCount * sizeof(wchar_t), pDest + uDestLength);
+            std::copy_n(pSource, uCount, pDest + uDestLength);
             pDest[uDestLength + uCount] = L'\0';
         }
 

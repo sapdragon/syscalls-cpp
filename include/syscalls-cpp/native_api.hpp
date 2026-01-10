@@ -9,6 +9,46 @@
 
 namespace syscall::native
 {
+    namespace detail
+    {
+        inline hashing::Hash_t appendDllExtensionToHash(hashing::Hash_t uHash)
+        {
+            for (char c : {'.', 'd', 'l', 'l'})
+            {
+                uHash ^= static_cast<hashing::Hash_t>(c);
+                uHash += std::rotr(uHash, 11) + hashing::polyKey2;
+            }
+            return uHash;
+        }
+
+        struct ForwarderInfo_t
+        {
+            char m_szDllName[256];
+            char* m_szFuncName;
+            bool m_bValid;
+        };
+
+        inline ForwarderInfo_t parseForwarderString(const uint8_t* pBase, uint32_t uFunctionRva)
+        {
+            ForwarderInfo_t forwarderInfo{};
+            std::copy_n(reinterpret_cast<const char*>(pBase + uFunctionRva),
+                        sizeof(forwarderInfo.m_szDllName) - 1, forwarderInfo.m_szDllName);
+            forwarderInfo.m_szDllName[sizeof(forwarderInfo.m_szDllName) - 1] = '\0';
+
+            auto pSeparator = std::ranges::find(forwarderInfo.m_szDllName, '.');
+            if (pSeparator == std::end(forwarderInfo.m_szDllName) || *pSeparator == '\0')
+            {
+                forwarderInfo.m_bValid = false;
+                return forwarderInfo;
+            }
+
+            *pSeparator = '\0';
+            forwarderInfo.m_szFuncName = pSeparator + 1;
+            forwarderInfo.m_bValid = true;
+            return forwarderInfo;
+        }
+    }
+
     inline PPEB getCurrentPEB()
     {
 #if SYSCALL_PLATFORM_WINDOWS_64
@@ -35,8 +75,28 @@ namespace syscall::native
         return hash;
     }
 
+    inline hashing::Hash_t calculateHashRuntimeCi(const char* szData)
+    {
+        if (!szData)
+            return 0;
+
+        hashing::Hash_t hash = hashing::polyKey1;
+        char cCurrent = 0;
+
+        while ((cCurrent = *szData++))
+        {
+            char cLower = crt::string::toLower(cCurrent);
+            hash ^= static_cast<hashing::Hash_t>(cLower);
+            hash += std::rotr(hash, 11) + hashing::polyKey2;
+        }
+        return hash;
+    }
+
     inline HMODULE getModuleBase(const wchar_t* wzModuleName)
     {
+        if (!wzModuleName)
+            return nullptr;
+
         auto pPeb = getCurrentPEB();
         if (!pPeb || !pPeb->Ldr)
             return nullptr;
@@ -114,44 +174,21 @@ namespace syscall::native
             if (uFunctionRva < uExportSectionStart || uFunctionRva >= uExportSectionEnd)
                 return pBase + uFunctionRva;
 
-            char szForwarderString[256];
-            std::copy_n(
-                reinterpret_cast<const char *>(pBase + uFunctionRva),
-                sizeof(szForwarderString)-1, szForwarderString);
-
-            const auto szSeparator = std::ranges::find(szForwarderString, '.');
-            if (szSeparator == std::cend(szForwarderString))
+            auto forwarder = detail::parseForwarderString(pBase, uFunctionRva);
+            if (!forwarder.m_bValid)
                 return nullptr;
 
-            *szSeparator = '\0';
-            char* szForwarderFuncName = szSeparator + 1;
-            char* szForwarderDllName = szForwarderString;
-            hashing::Hash_t uForwarderDllHash = hashing::polyKey1;
+            hashing::Hash_t uForwarderDllHash = calculateHashRuntimeCi(forwarder.m_szDllName);
+            if (!uForwarderDllHash)
+                return nullptr;
 
-            for (const char* pChar = szForwarderDllName; *pChar; ++pChar)
-            {
-                char cLower = crt::string::toLower(*pChar);
-                uForwarderDllHash ^= static_cast<hashing::Hash_t>(cLower);
-                uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
-            }
-
-            uForwarderDllHash ^= static_cast<hashing::Hash_t>('.');
-            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
-
-            uForwarderDllHash ^= static_cast<hashing::Hash_t>('d');
-            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
-
-            uForwarderDllHash ^= static_cast<hashing::Hash_t>('l');
-            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
-
-            uForwarderDllHash ^= static_cast<hashing::Hash_t>('l');
-            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+            uForwarderDllHash = detail::appendDllExtensionToHash(uForwarderDllHash);
 
             const HMODULE hForwarderModuleBase = getModuleBase(uForwarderDllHash);
             if (!hForwarderModuleBase)
                 return nullptr;
 
-            return getExportAddress(hForwarderModuleBase, szForwarderFuncName);
+            return getExportAddress(hForwarderModuleBase, forwarder.m_szFuncName);
         }
         return nullptr;
     }
@@ -191,46 +228,24 @@ namespace syscall::native
             auto uExportSectionStart = uExportDirRva;
             auto uExportSectionEnd = uExportSectionStart + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
-            if (uFunctionRva < uExportSectionStart ||
-                uFunctionRva >= uExportSectionEnd)
-              return pBase + uFunctionRva;
+            if (uFunctionRva < uExportSectionStart || uFunctionRva >= uExportSectionEnd)
+                return pBase + uFunctionRva;
 
-            char szForwarderString[256];
-            std::copy_n(reinterpret_cast<const char *>(pBase + uFunctionRva), sizeof(szForwarderString)-1, szForwarderString);
-            const auto szSeparator = std::ranges::find(szForwarderString, '.');
+            auto forwarder = detail::parseForwarderString(pBase, uFunctionRva);
+            if (!forwarder.m_bValid)
+                return nullptr;
 
-            if (szSeparator == std::cend(szForwarderString))
-              return nullptr;
-
-            *szSeparator = '\0';
-            char *szForwarderFuncName = szSeparator + 1;
-            char *szForwarderDllName = szForwarderString;
-
-            wchar_t wzWideDllName[260];
-            crt::string::mbToWcs(wzWideDllName, crt::getCountOf(wzWideDllName), szForwarderDllName);
-            hashing::Hash_t uForwarderDllHash = calculateHashRuntimeCi(wzWideDllName);
-            
+            hashing::Hash_t uForwarderDllHash = calculateHashRuntimeCi(forwarder.m_szDllName);
             if (!uForwarderDllHash)
-              return nullptr;
+                return nullptr;
 
-            uForwarderDllHash ^= static_cast<hashing::Hash_t>('.');
-            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
-
-            uForwarderDllHash ^= static_cast<hashing::Hash_t>('d');
-            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
-
-            uForwarderDllHash ^= static_cast<hashing::Hash_t>('l');
-            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
-
-            uForwarderDllHash ^= static_cast<hashing::Hash_t>('l');
-            uForwarderDllHash += std::rotr(uForwarderDllHash, 11) + hashing::polyKey2;
+            uForwarderDllHash = detail::appendDllExtensionToHash(uForwarderDllHash);
 
             HMODULE hForwarderModuleBase = getModuleBase(uForwarderDllHash);
-
             if (!hForwarderModuleBase)
-              return nullptr;
+                return nullptr;
 
-            hashing::Hash_t uForwarderFuncHash = hashing::calculateHashRuntime(szForwarderFuncName);
+            hashing::Hash_t uForwarderFuncHash = hashing::calculateHashRuntime(forwarder.m_szFuncName);
             return getExportAddress(hForwarderModuleBase, uForwarderFuncHash);
         }
         return nullptr;

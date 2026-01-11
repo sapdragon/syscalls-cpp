@@ -13,11 +13,18 @@ namespace syscall::native
     {
         inline hashing::Hash_t appendDllExtensionToHash(hashing::Hash_t uHash)
         {
-            for (char c : {'.', 'd', 'l', 'l'})
-            {
-                uHash ^= static_cast<hashing::Hash_t>(c);
-                uHash += std::rotr(uHash, 11) + hashing::polyKey2;
-            }
+            uHash ^= static_cast<hashing::Hash_t>('.');
+            uHash += std::rotr(uHash, 11) + hashing::polyKey2;
+
+            uHash ^= static_cast<hashing::Hash_t>('d');
+            uHash += std::rotr(uHash, 11) + hashing::polyKey2;
+
+            uHash ^= static_cast<hashing::Hash_t>('l');
+            uHash += std::rotr(uHash, 11) + hashing::polyKey2;
+
+            uHash ^= static_cast<hashing::Hash_t>('l');
+            uHash += std::rotr(uHash, 11) + hashing::polyKey2;
+
             return uHash;
         }
 

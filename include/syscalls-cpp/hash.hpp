@@ -3,6 +3,7 @@
 
 #include <cstdint>
 #include <string>
+#include <string_view>
 #include <bit>
 
 namespace syscall::hashing
@@ -68,6 +69,17 @@ namespace syscall::hashing
         for (size_t i = 0; i < uLength && szData[i]; ++i)
         {
             hash ^= static_cast<Hash_t>(szData[i]);
+            hash += std::rotr(hash, 11) + polyKey2;
+        }
+        return hash;
+    }
+
+    inline Hash_t calculateHashRuntime(std::string_view sv)
+    {
+        Hash_t hash = polyKey1;
+        for (char c : sv)
+        {
+            hash ^= static_cast<Hash_t>(c);
             hash += std::rotr(hash, 11) + polyKey2;
         }
         return hash;

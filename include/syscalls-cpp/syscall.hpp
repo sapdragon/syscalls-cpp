@@ -14,6 +14,7 @@
 #include <array>
 #include <random>
 #include <algorithm>
+#include <ranges>
 #include <span>
 
 #include "shared.hpp"
@@ -167,14 +168,12 @@ namespace syscall
             {
                 static bool allocate(size_t uRegionSize, const std::span<const uint8_t> vecBuffer, void*& pOutRegion, HANDLE& hOutHeapHandle)
                 {
-                    using RtlGetLastNtStatus_t = NTSTATUS(NTAPI*)();
                     HMODULE hNtdll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
                     if (!hNtdll)
                         return false;
 
                     auto fRtlCreateHeap = reinterpret_cast<native::RtlCreateHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlCreateHeap")));
                     auto fRtlAllocateHeap = reinterpret_cast<native::RtlAllocateHeap_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlAllocateHeap")));
-                    auto fRtlGetLastNtStatus = reinterpret_cast<RtlGetLastNtStatus_t>(native::getExportAddress(hNtdll, SYSCALL_ID("RtlGetLastNtStatus")));
                     if (!fRtlCreateHeap || !fRtlAllocateHeap)
                         return false;
 
@@ -750,10 +749,7 @@ namespace syscall
                 m_vecParsedSyscalls[i].m_uOffset = static_cast<uint32_t>(i * IStubGenerationPolicy::getStubSize());
 
 
-            std::sort(m_vecParsedSyscalls.begin(), m_vecParsedSyscalls.end(),
-                [](const SyscallEntry_t& a, const SyscallEntry_t& b) {
-                    return a.m_key < b.m_key;
-                });
+            std::ranges::sort(m_vecParsedSyscalls, std::less{}, &SyscallEntry_t::m_key);
 
             m_bInitialized = createSyscalls();
             if (m_bInitialized)
@@ -785,10 +781,7 @@ namespace syscall
                     return Ret{};
                 }
             }
-            auto it = std::lower_bound(m_vecParsedSyscalls.begin(), m_vecParsedSyscalls.end(), syscallId,
-                [](const SyscallEntry_t& entry, const SyscallKey_t& id) {
-                    return entry.m_key < id;
-                });
+            auto it = std::ranges::lower_bound(m_vecParsedSyscalls, syscallId, std::less{}, &SyscallEntry_t::m_key);
 
             if (it == m_vecParsedSyscalls.end() || it->m_key != syscallId)
             {
@@ -815,7 +808,7 @@ namespace syscall
 
                 const size_t uRandomIndex = native::rdtscp() % uGadgetCount;
                 void* pRandomGadget = m_vecSyscallGadgets[uRandomIndex];
-#else SYSCALL_PLATFORM_WINDOWS_32
+#else
                 void* pRandomGadget = (void*)__readfsdword(0xC0);
 #endif
 

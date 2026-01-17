@@ -9,7 +9,6 @@
 
 namespace syscall::native
 {
-    // @todo / sapdragon: we need refactoring here.
     inline void* getExportAddress(HMODULE hModuleBase, const char* szExportName);
     inline void* getExportAddress(HMODULE hModuleBase, hashing::Hash_t uExportHash);
 
@@ -25,7 +24,7 @@ namespace syscall::native
             uHash += std::rotr(uHash, 11) + hashing::polyKey2;
             uHash ^= static_cast<hashing::Hash_t>('l');
             uHash += std::rotr(uHash, 11) + hashing::polyKey2;
-            
+
             return uHash;
         }
 
@@ -34,7 +33,6 @@ namespace syscall::native
             char  m_szDllName[256];
             char* m_pszFuncName;
         };
-
 
         inline bool parseForwarderString(const uint8_t* pBase, uint32_t uFunctionRva, ForwarderInfo_t& outInfo)
         {
@@ -57,11 +55,58 @@ namespace syscall::native
                 return false;
 
             *pszDot = '\0';
-            
             outInfo.m_pszFuncName = pszDot + 1;
 
             return true;
         }
+
+        struct ExportDirectory_t
+        {
+            uint8_t*                 pBase;
+            PIMAGE_NT_HEADERS        pNtHeaders;
+            PIMAGE_EXPORT_DIRECTORY  pExportDir;
+            uint32_t*                pNamesRVA;
+            uint16_t*                pOrdinalsRVA;
+            uint32_t*                pFunctionsRVA;
+            uint32_t                 uExportDirRva;
+            uint32_t                 uExportDirSize;
+        };
+
+        inline bool getExportDirectory(HMODULE hModuleBase, ExportDirectory_t& outDir)
+        {
+            if (!hModuleBase)
+                return false;
+
+            outDir.pBase = reinterpret_cast<uint8_t*>(hModuleBase);
+
+            auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(outDir.pBase);
+            if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+                return false;
+
+            outDir.pNtHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>(outDir.pBase + pDosHeader->e_lfanew);
+            if (outDir.pNtHeaders->Signature != IMAGE_NT_SIGNATURE)
+                return false;
+
+            outDir.uExportDirRva  = outDir.pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
+            outDir.uExportDirSize = outDir.pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
+            if (!outDir.uExportDirRva)
+                return false;
+
+            outDir.pExportDir    = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(outDir.pBase + outDir.uExportDirRva);
+            outDir.pNamesRVA     = reinterpret_cast<uint32_t*>(outDir.pBase + outDir.pExportDir->AddressOfNames);
+            outDir.pOrdinalsRVA  = reinterpret_cast<uint16_t*>(outDir.pBase + outDir.pExportDir->AddressOfNameOrdinals);
+            outDir.pFunctionsRVA = reinterpret_cast<uint32_t*>(outDir.pBase + outDir.pExportDir->AddressOfFunctions);
+
+            return true;
+        }
+
+        inline bool isForwarder(const ExportDirectory_t& dir, uint32_t uFunctionRva)
+        {
+            return uFunctionRva >= dir.uExportDirRva &&
+                   uFunctionRva < dir.uExportDirRva + dir.uExportDirSize;
+        }
+
+        inline void* resolveForwarder(const ExportDirectory_t& dir, uint32_t uFunctionRva);
     }
 
     inline PPEB getCurrentPEB()
@@ -152,117 +197,69 @@ namespace syscall::native
         return nullptr;
     }
 
+    inline void* detail::resolveForwarder(const detail::ExportDirectory_t& dir, uint32_t uFunctionRva)
+    {
+        detail::ForwarderInfo_t forwarderInfo;
+        if (!parseForwarderString(dir.pBase, uFunctionRva, forwarderInfo))
+            return nullptr;
+
+        hashing::Hash_t uDllHash = calculateHashRuntimeCi(forwarderInfo.m_szDllName);
+        if (!uDllHash)
+            return nullptr;
+
+        uDllHash = appendDllExtensionToHash(uDllHash);
+
+        HMODULE hModule = getModuleBase(uDllHash);
+        if (!hModule)
+            return nullptr;
+
+        return getExportAddress(hModule, forwarderInfo.m_pszFuncName);
+    }
+
     inline void* getExportAddress(HMODULE hModuleBase, const char* szExportName)
     {
-        if (!hModuleBase || !szExportName)
+        if (!szExportName)
             return nullptr;
 
-        auto pBase = reinterpret_cast<uint8_t*>(hModuleBase);
-        auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(pBase);
-        if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
+        detail::ExportDirectory_t dir;
+        if (!detail::getExportDirectory(hModuleBase, dir))
             return nullptr;
 
-        auto pNtHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>(pBase + pDosHeader->e_lfanew);
-        if (pNtHeaders->Signature != IMAGE_NT_SIGNATURE)
-            return nullptr;
-
-        auto uExportDirRva = pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-        if (!uExportDirRva) return nullptr;
-
-        auto pExportDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(pBase + uExportDirRva);
-        auto pNamesRVA = reinterpret_cast<uint32_t*>(pBase + pExportDir->AddressOfNames);
-        auto pOrdinalsRVA = reinterpret_cast<uint16_t*>(pBase + pExportDir->AddressOfNameOrdinals);
-        auto pFunctionsRVA = reinterpret_cast<uint32_t*>(pBase + pExportDir->AddressOfFunctions);
-
-        for (uint32_t i = 0; i < pExportDir->NumberOfNames; ++i)
+        for (uint32_t i = 0; i < dir.pExportDir->NumberOfNames; ++i)
         {
-            auto szCurrentProcName = reinterpret_cast<const char*>(pBase + pNamesRVA[i]);
-
+            const char* szCurrentProcName = reinterpret_cast<const char*>(dir.pBase + dir.pNamesRVA[i]);
             if (std::string_view{szCurrentProcName} != std::string_view{szExportName})
                 continue;
 
-            const uint16_t usOrdinal = pOrdinalsRVA[i];
-            const uint32_t uFunctionRva = pFunctionsRVA[usOrdinal];
-            auto uExportSectionStart = uExportDirRva;
-            auto uExportSectionEnd = uExportSectionStart + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
+            uint32_t uFunctionRva = dir.pFunctionsRVA[dir.pOrdinalsRVA[i]];
+            if (!detail::isForwarder(dir, uFunctionRva))
+                return dir.pBase + uFunctionRva;
 
-            if (uFunctionRva < uExportSectionStart || uFunctionRva >= uExportSectionEnd)
-                return pBase + uFunctionRva;
-
-            detail::ForwarderInfo_t forwarderInfo;
-            if (!detail::parseForwarderString(pBase, uFunctionRva, forwarderInfo))
-                return nullptr;
-
-            hashing::Hash_t uForwarderDllHash = calculateHashRuntimeCi(forwarderInfo.m_szDllName);
-            if (!uForwarderDllHash) 
-                return nullptr;
-
-            uForwarderDllHash = detail::appendDllExtensionToHash(uForwarderDllHash);
-
-            HMODULE hForwarderModuleBase = getModuleBase(uForwarderDllHash);
-            if (!hForwarderModuleBase) 
-                return nullptr;
-
-            hashing::Hash_t uForwarderFuncHash = hashing::calculateHashRuntime(forwarderInfo.m_pszFuncName);
-            return getExportAddress(hForwarderModuleBase, uForwarderFuncHash);
+            return detail::resolveForwarder(dir, uFunctionRva);
         }
+
         return nullptr;
     }
 
     inline void* getExportAddress(HMODULE hModuleBase, hashing::Hash_t uExportHash)
     {
-        if (!hModuleBase)
+        detail::ExportDirectory_t dir;
+        if (!detail::getExportDirectory(hModuleBase, dir))
             return nullptr;
 
-        auto pBase = reinterpret_cast<uint8_t*>(hModuleBase);
-        auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(pBase);
-        if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
-            return nullptr;
-
-        auto pNtHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>(pBase + pDosHeader->e_lfanew);
-        if (pNtHeaders->Signature != IMAGE_NT_SIGNATURE)
-            return nullptr;
-
-        auto uExportDirRva = pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].VirtualAddress;
-        if (!uExportDirRva)
-            return nullptr;
-
-        auto pExportDir = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(pBase + uExportDirRva);
-        auto pNamesRVA = reinterpret_cast<uint32_t*>(pBase + pExportDir->AddressOfNames);
-        auto pOrdinalsRVA = reinterpret_cast<uint16_t*>(pBase + pExportDir->AddressOfNameOrdinals);
-        auto pFunctionsRVA = reinterpret_cast<uint32_t*>(pBase + pExportDir->AddressOfFunctions);
-
-        for (uint32_t i = 0; i < pExportDir->NumberOfNames; ++i)
+        for (uint32_t i = 0; i < dir.pExportDir->NumberOfNames; ++i)
         {
-            const char* szCurrentProcName = reinterpret_cast<const char*>(pBase + pNamesRVA[i]);
-
+            const char* szCurrentProcName = reinterpret_cast<const char*>(dir.pBase + dir.pNamesRVA[i]);
             if (hashing::calculateHashRuntime(szCurrentProcName) != uExportHash)
                 continue;
 
-            uint16_t usOrdinal = pOrdinalsRVA[i];
-            uint32_t uFunctionRva = pFunctionsRVA[usOrdinal];
-            auto uExportSectionStart = uExportDirRva;
-            auto uExportSectionEnd = uExportSectionStart + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
+            uint32_t uFunctionRva = dir.pFunctionsRVA[dir.pOrdinalsRVA[i]];
+            if (!detail::isForwarder(dir, uFunctionRva))
+                return dir.pBase + uFunctionRva;
 
-            if (uFunctionRva < uExportSectionStart || uFunctionRva >= uExportSectionEnd)
-                return pBase + uFunctionRva;
-
-            detail::ForwarderInfo_t forwarderInfo;
-            if (!detail::parseForwarderString(pBase, uFunctionRva, forwarderInfo))
-                return nullptr;
-
-            hashing::Hash_t uForwarderDllHash = calculateHashRuntimeCi(forwarderInfo.m_szDllName);
-            if (!uForwarderDllHash) 
-                return nullptr;
-
-            uForwarderDllHash = detail::appendDllExtensionToHash(uForwarderDllHash);
-
-            const HMODULE hForwarderModuleBase = getModuleBase(uForwarderDllHash);
-            if (!hForwarderModuleBase) 
-                return nullptr;
-                
-            return getExportAddress(hForwarderModuleBase, forwarderInfo.m_pszFuncName);
+            return detail::resolveForwarder(dir, uFunctionRva);
         }
+
         return nullptr;
     }
 

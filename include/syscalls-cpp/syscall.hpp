@@ -46,7 +46,7 @@ namespace syscall
     };
 
 
-    thread_local struct ExceptionContext_t
+    inline thread_local struct ExceptionContext_t
     {
         bool m_bShouldHandle = false;
         const void* m_pExpectedExceptionAddress = nullptr;
@@ -74,7 +74,7 @@ namespace syscall
         CExceptionContextGuard& operator=(const CExceptionContextGuard&) = delete;
     };
 
-    LONG NTAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
+    static LONG NTAPI VectoredExceptionHandler(PEXCEPTION_POINTERS pExceptionInfo)
     {
         if (!pExceptionContext.m_bShouldHandle)
             return EXCEPTION_CONTINUE_SEARCH;

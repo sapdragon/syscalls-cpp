@@ -70,7 +70,7 @@ The power is in the combination. Here is how you build and use a syscall manager
 #include "syscall.hpp"
 
 int main() {
-    SyscallSectionDirect syscallManager;
+    syscall::SectionDirectManager syscallManager;
     // you can add your own modules for parsing syscalls, by default only ntdll is parsed
     if (!syscallManager.initialize(/* SYSCALL_ID("ntdll.dll"),  SYSCALL_ID("win32u.dll")*/))
     {

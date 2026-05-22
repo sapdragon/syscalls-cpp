@@ -948,11 +948,13 @@ namespace syscall
         : public ManagerImpl<AllocPolicy, StubPolicy, FirstParser, FallbackParsers...>
     {
     };
-}
+
 #if SYSCALL_PLATFORM_WINDOWS_64
-using SyscallSectionGadget = syscall::Manager<syscall::policies::allocator::section, syscall::policies::generator::gadget>;
-using SyscallHeapGadget = syscall::Manager<syscall::policies::allocator::heap, syscall::policies::generator::gadget>;
+    using SectionGadgetManager = Manager<policies::allocator::section, policies::generator::gadget>;
+    using HeapGadgetManager = Manager<policies::allocator::heap, policies::generator::gadget>;
 #endif
-using SyscallSectionDirect = syscall::Manager<syscall::policies::allocator::section, syscall::policies::generator::direct>;
+
+    using SectionDirectManager = Manager<policies::allocator::section, policies::generator::direct>;
+}
 
 #endif  

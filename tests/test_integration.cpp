@@ -58,17 +58,17 @@ TEST_F(SyscallManagerTest, InitializesWithExceptionX64)
 
 TEST_F(SyscallManagerTest, DoubleInitSucceeds)
 {
-    SyscallSectionDirect manager;
+    syscall::SectionDirectManager manager;
     EXPECT_TRUE(manager.initialize());
     EXPECT_TRUE(manager.initialize());
 }
 
 TEST_F(SyscallManagerTest, MoveConstructorWorks)
 {
-    SyscallSectionDirect manager1;
+    syscall::SectionDirectManager manager1;
     ASSERT_TRUE(manager1.initialize());
 
-    SyscallSectionDirect manager2 = std::move(manager1);
+    syscall::SectionDirectManager manager2 = std::move(manager1);
 
     PVOID pBaseAddress = nullptr;
     SIZE_T uRegionSize = 0x1000;
@@ -101,7 +101,7 @@ TEST_F(SyscallManagerTest, MoveConstructorWorks)
 class SyscallInvokeTest : public ::testing::Test
 {
 protected:
-    SyscallSectionDirect manager;
+    syscall::SectionDirectManager manager;
 
     void SetUp() override
     {
@@ -272,10 +272,10 @@ TEST_F(NativeApiTest, RdtscpReturnsValue)
 
 TEST(ManagerOwnershipTest, MoveAssignmentWorks)
 {
-    SyscallSectionDirect manager1;
+    syscall::SectionDirectManager manager1;
     ASSERT_TRUE(manager1.initialize());
 
-    SyscallSectionDirect manager2;
+    syscall::SectionDirectManager manager2;
     manager2 = std::move(manager1);
 
     PVOID pAddress = nullptr;
@@ -610,7 +610,7 @@ TEST_F(SyscallPolicyTest, ExceptionGeneratorWithSignatureParser)
 
 TEST_F(SyscallPolicyTest, InvokeWithoutInitialize)
 {
-    SyscallSectionDirect manager;
+    syscall::SectionDirectManager manager;
 
     PVOID pBaseAddress = nullptr;
     SIZE_T uRegionSize = 0x1000;
@@ -643,7 +643,7 @@ TEST_F(SyscallPolicyTest, InvokeWithoutInitialize)
 
 TEST_F(SyscallPolicyTest, MultipleSyscallsSequentially)
 {
-    SyscallSectionDirect manager;
+    syscall::SectionDirectManager manager;
     ASSERT_TRUE(manager.initialize());
 
     for (int i = 0; i < 100; ++i)
@@ -679,7 +679,7 @@ TEST_F(SyscallPolicyTest, MultipleSyscallsSequentially)
 
 TEST_F(SyscallPolicyTest, NtProtectVirtualMemory)
 {
-    SyscallSectionDirect manager;
+    syscall::SectionDirectManager manager;
     ASSERT_TRUE(manager.initialize());
 
     PVOID pBaseAddress = nullptr;
@@ -726,7 +726,7 @@ TEST_F(SyscallPolicyTest, NtProtectVirtualMemory)
 
 TEST_F(SyscallPolicyTest, NtQueryVirtualMemory)
 {
-    SyscallSectionDirect manager;
+    syscall::SectionDirectManager manager;
     ASSERT_TRUE(manager.initialize());
 
     PVOID pBaseAddress = nullptr;

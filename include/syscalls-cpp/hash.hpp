@@ -10,8 +10,6 @@ namespace syscall::hashing
 {
     using Hash_t = uint64_t;
 
-    constexpr Hash_t defaultSeed = 0;
-
 #ifndef SYSCALLS_HASH_SEED
 #define SYSCALLS_HASH_SEED 0
 #endif

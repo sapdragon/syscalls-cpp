@@ -76,12 +76,6 @@ TEST(HashTest, SeedIsConsistent)
     EXPECT_EQ(currentSeed, getCompileTimeSeed());
 }
 
-TEST(HashTest, DefaultSeedIsStable)
-{
-    static_assert(defaultSeed == 0);
-    EXPECT_EQ(defaultSeed, 0);
-}
-
 TEST(HashTest, CommonNtFunctionsUnique)
 {
     constexpr auto uHash1 = calculateHash("NtClose");

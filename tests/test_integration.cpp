@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 #include <syscalls-cpp/syscall.hpp>
+#include <string>
 
 class SyscallManagerTest : public ::testing::Test {};
 
@@ -195,6 +196,18 @@ TEST_F(NativeApiTest, GetModuleBaseKernel32)
 TEST_F(NativeApiTest, GetModuleBaseWideString)
 {
     HMODULE hNtdll = syscall::native::getModuleBase(L"ntdll.dll");
+    EXPECT_NE(hNtdll, nullptr);
+}
+
+TEST_F(NativeApiTest, GetModuleBaseAnsiString)
+{
+    HMODULE hNtdll = syscall::native::getModuleBase("ntdll.dll");
+    EXPECT_NE(hNtdll, nullptr);
+}
+
+TEST_F(NativeApiTest, GetModuleBaseStringObject)
+{
+    HMODULE hNtdll = syscall::native::getModuleBase(std::string{ "ntdll.dll" });
     EXPECT_NE(hNtdll, nullptr);
 }
 

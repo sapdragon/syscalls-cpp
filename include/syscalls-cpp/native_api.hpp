@@ -6,6 +6,7 @@
 #include "hash.hpp"
 #include <cstdint>
 #include <cwchar>
+#include <string_view>
 
 namespace syscall::native
 {
@@ -107,6 +108,18 @@ namespace syscall::native
         return hash;
     }
 
+    inline hashing::Hash_t calculateHashRuntimeCi(std::string_view svData)
+    {
+        hashing::Hash_t hash = hashing::polyKey1;
+        for (char cCurrent : svData)
+        {
+            char cLower = crt::string::toLower(cCurrent);
+            hash ^= static_cast<hashing::Hash_t>(cLower);
+            hash += std::rotr(hash, 11) + hashing::polyKey2;
+        }
+        return hash;
+    }
+
     inline HMODULE getModuleBase(const wchar_t* wzModuleName)
     {
         if (!wzModuleName)
@@ -150,6 +163,22 @@ namespace syscall::native
             pCurrentEntry = pCurrentEntry->Flink;
         }
         return nullptr;
+    }
+
+    inline HMODULE getModuleBase(std::string_view svModuleName)
+    {
+        if (svModuleName.empty())
+            return nullptr;
+
+        return getModuleBase(calculateHashRuntimeCi(svModuleName));
+    }
+
+    inline HMODULE getModuleBase(const char* szModuleName)
+    {
+        if (!szModuleName)
+            return nullptr;
+
+        return getModuleBase(std::string_view{ szModuleName });
     }
 
     inline void* getExportAddress(HMODULE hModuleBase, const char* szExportName)

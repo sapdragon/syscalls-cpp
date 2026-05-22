@@ -60,6 +60,17 @@ syscalls-cpp/1.2.0
 
 For manual setup, you can clone this repository and add the `include` directory to your project's include paths.
 
+
+## Community Ports
+
+Community-maintained ports and bindings:
+
+| Language | Repository |
+| :--- | :--- |
+| Rust | [orange-cpp/syscalls-rs](https://github.com/orange-cpp/syscalls-rs) |
+
+> These ports are maintained by the community and may differ from the C++ implementation in API, features, and release cadence.
+
 ## Example: Crafting Your Strategy
 
 The power is in the combination. Here is how you build and use a syscall manager.

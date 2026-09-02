@@ -6,74 +6,52 @@ class SyscallManagerTest : public ::testing::Test {};
 
 TEST_F(SyscallManagerTest, InitializesWithSectionDirect)
 {
-    syscall::Manager<
-        syscall::policies::allocator::section,
-        syscall::policies::generator::direct
-    > manager;
+    std::optional optManager = syscall::Manager<syscall::policies::allocator::section, syscall::policies::generator::direct>::initialize();
 
-    EXPECT_TRUE(manager.initialize());
+    EXPECT_TRUE(optManager.has_value());
 }
 
 TEST_F(SyscallManagerTest, InitializesWithHeapDirect)
 {
-    syscall::Manager<
-        syscall::policies::allocator::heap,
-        syscall::policies::generator::direct
-    > manager;
+    std::optional optManager = syscall::Manager<syscall::policies::allocator::heap, syscall::policies::generator::direct>::initialize();
 
-    EXPECT_TRUE(manager.initialize());
+    EXPECT_TRUE(optManager.has_value());
 }
 
 TEST_F(SyscallManagerTest, InitializesWithMemoryDirect)
 {
-    syscall::Manager<
-        syscall::policies::allocator::memory,
-        syscall::policies::generator::direct
-    > manager;
+    std::optional optManager = syscall::Manager<syscall::policies::allocator::memory, syscall::policies::generator::direct>::initialize();
 
-    EXPECT_TRUE(manager.initialize());
+    EXPECT_TRUE(optManager.has_value());
 }
 
 #if SYSCALL_PLATFORM_WINDOWS_64
 TEST_F(SyscallManagerTest, InitializesWithGadgetX64)
 {
-    syscall::Manager<
-        syscall::policies::allocator::section,
-        syscall::policies::generator::gadget
-    > manager;
+    std::optional optManager = syscall::Manager<syscall::policies::allocator::section, syscall::policies::generator::gadget>::initialize();
 
-    EXPECT_TRUE(manager.initialize());
+    EXPECT_TRUE(optManager.has_value());
 }
 
 TEST_F(SyscallManagerTest, InitializesWithExceptionX64)
 {
-    syscall::Manager<
-        syscall::policies::allocator::section,
-        syscall::policies::generator::exception
-    > manager;
+    std::optional optManager = syscall::Manager<syscall::policies::allocator::section, syscall::policies::generator::exception>::initialize();
 
-    EXPECT_TRUE(manager.initialize());
+    EXPECT_TRUE(optManager.has_value());
 }
 #endif
 
-TEST_F(SyscallManagerTest, DoubleInitSucceeds)
-{
-    syscall::SectionDirectManager manager;
-    EXPECT_TRUE(manager.initialize());
-    EXPECT_TRUE(manager.initialize());
-}
-
 TEST_F(SyscallManagerTest, MoveConstructorWorks)
 {
-    syscall::SectionDirectManager manager1;
-    ASSERT_TRUE(manager1.initialize());
+    std::optional optManager = syscall::SectionDirectManager::initialize();
+    ASSERT_TRUE(optManager.has_value());
 
-    syscall::SectionDirectManager manager2 = std::move(manager1);
+    syscall::SectionDirectManager movedManager = std::move(optManager.value());
 
     PVOID pBaseAddress = nullptr;
     SIZE_T uRegionSize = 0x1000;
 
-    NTSTATUS status = manager2.invoke<NTSTATUS>(
+    NTSTATUS status = movedManager.invoke<NTSTATUS>(
         SYSCALL_ID("NtAllocateVirtualMemory"),
         syscall::native::getCurrentProcess(),
         &pBaseAddress,
@@ -88,7 +66,7 @@ TEST_F(SyscallManagerTest, MoveConstructorWorks)
     if (pBaseAddress)
     {
         uRegionSize = 0;
-        manager2.invoke<NTSTATUS>(
+        movedManager.invoke<NTSTATUS>(
             SYSCALL_ID("NtFreeVirtualMemory"),
             syscall::native::getCurrentProcess(),
             &pBaseAddress,
@@ -101,11 +79,12 @@ TEST_F(SyscallManagerTest, MoveConstructorWorks)
 class SyscallInvokeTest : public ::testing::Test
 {
 protected:
-    syscall::SectionDirectManager manager;
+    std::optional<syscall::SectionDirectManager> optManager;
 
     void SetUp() override
     {
-        ASSERT_TRUE(manager.initialize());
+        optManager = syscall::SectionDirectManager::initialize();
+        ASSERT_TRUE(optManager.has_value());
     }
 };
 
@@ -114,7 +93,7 @@ TEST_F(SyscallInvokeTest, NtAllocateVirtualMemory)
     PVOID pBaseAddress = nullptr;
     SIZE_T uRegionSize = 0x1000;
 
-    NTSTATUS status = manager.invoke<NTSTATUS>(
+    NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtAllocateVirtualMemory"),
         syscall::native::getCurrentProcess(),
         &pBaseAddress,
@@ -131,7 +110,7 @@ TEST_F(SyscallInvokeTest, NtAllocateVirtualMemory)
     if (pBaseAddress)
     {
         uRegionSize = 0;
-        manager.invoke<NTSTATUS>(
+        optManager->invoke<NTSTATUS>(
             SYSCALL_ID("NtFreeVirtualMemory"),
             syscall::native::getCurrentProcess(),
             &pBaseAddress,
@@ -144,7 +123,7 @@ TEST_F(SyscallInvokeTest, NtAllocateVirtualMemory)
 TEST_F(SyscallInvokeTest, NtQuerySystemInformation)
 {
     ULONG uReturnLength = 0;
-    NTSTATUS status = manager.invoke<NTSTATUS>(
+    NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtQuerySystemInformation"),
         0,
         nullptr,
@@ -158,7 +137,7 @@ TEST_F(SyscallInvokeTest, NtQuerySystemInformation)
 
 TEST_F(SyscallInvokeTest, InvalidSyscallReturnsNotFound)
 {
-    NTSTATUS status = manager.invoke<NTSTATUS>(
+    NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtThisFunctionDoesNotExist123456")
     );
 
@@ -167,7 +146,7 @@ TEST_F(SyscallInvokeTest, InvalidSyscallReturnsNotFound)
 
 TEST_F(SyscallInvokeTest, NtCloseInvalidHandle)
 {
-    NTSTATUS status = manager.invoke<NTSTATUS>(
+    NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtClose"),
         reinterpret_cast<HANDLE>(0xDEADBEEF)
     );
@@ -272,11 +251,10 @@ TEST_F(NativeApiTest, RdtscpReturnsValue)
 
 TEST(ManagerOwnershipTest, MoveAssignmentWorks)
 {
-    syscall::SectionDirectManager manager1;
-    ASSERT_TRUE(manager1.initialize());
+    std::optional<syscall::SectionDirectManager> manager1 = syscall::SectionDirectManager::initialize();
+    ASSERT_TRUE(manager1.has_value());
 
-    syscall::SectionDirectManager manager2;
-    manager2 = std::move(manager1);
+    syscall::SectionDirectManager manager2 = std::move(manager1.value());
 
     PVOID pAddress = nullptr;
     SIZE_T uRegionSize = 0x1000;
@@ -476,18 +454,18 @@ class SyscallPolicyTest : public ::testing::Test {};
 
 TEST_F(SyscallPolicyTest, SignatureParserDirect)
 {
-    syscall::Manager<
+    std::optional optManager = syscall::Manager<
         syscall::policies::allocator::section,
         syscall::policies::generator::direct,
         syscall::policies::parser::signature
-    > manager;
+    >::initialize();
 
-    EXPECT_TRUE(manager.initialize());
+    EXPECT_TRUE(optManager.has_value());
 
     PVOID pBaseAddress = nullptr;
     SIZE_T uRegionSize = 0x1000;
 
-    NTSTATUS status = manager.invoke<NTSTATUS>(
+    NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtAllocateVirtualMemory"),
         syscall::native::getCurrentProcess(),
         &pBaseAddress,
@@ -502,7 +480,7 @@ TEST_F(SyscallPolicyTest, SignatureParserDirect)
     if (pBaseAddress)
     {
         uRegionSize = 0;
-        manager.invoke<NTSTATUS>(
+        optManager->invoke<NTSTATUS>(
             SYSCALL_ID("NtFreeVirtualMemory"),
             syscall::native::getCurrentProcess(),
             &pBaseAddress,
@@ -514,15 +492,15 @@ TEST_F(SyscallPolicyTest, SignatureParserDirect)
 
 TEST_F(SyscallPolicyTest, DirectoryParserDirect)
 {
-    syscall::Manager<
+    std::optional optManager = syscall::Manager<
         syscall::policies::allocator::section,
         syscall::policies::generator::direct,
         syscall::policies::parser::directory
-    > manager;
+    >::initialize();
 
-    EXPECT_TRUE(manager.initialize());
+    EXPECT_TRUE(optManager.has_value());
 
-    NTSTATUS status = manager.invoke<NTSTATUS>(
+    NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtClose"),
         reinterpret_cast<HANDLE>(0xDEADBEEF)
     );
@@ -532,16 +510,16 @@ TEST_F(SyscallPolicyTest, DirectoryParserDirect)
 
 TEST_F(SyscallPolicyTest, HeapAllocatorWithSignatureParser)
 {
-    syscall::Manager<
-        syscall::policies::allocator::heap,
-        syscall::policies::generator::direct,
-        syscall::policies::parser::signature
-    > manager;
+    std::optional optManager = syscall::Manager<
+         syscall::policies::allocator::heap,
+         syscall::policies::generator::direct,
+         syscall::policies::parser::signature
+     >::initialize();
 
-    EXPECT_TRUE(manager.initialize());
+    EXPECT_TRUE(optManager.has_value());
 
     ULONG uReturnLength = 0;
-    NTSTATUS status = manager.invoke<NTSTATUS>(
+    NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtQuerySystemInformation"),
         0,
         nullptr,
@@ -554,15 +532,15 @@ TEST_F(SyscallPolicyTest, HeapAllocatorWithSignatureParser)
 
 TEST_F(SyscallPolicyTest, MemoryAllocatorWithSignatureParser)
 {
-    syscall::Manager<
+    std::optional optManager = syscall::Manager<
         syscall::policies::allocator::memory,
         syscall::policies::generator::direct,
         syscall::policies::parser::signature
-    > manager;
+    >::initialize();
 
-    EXPECT_TRUE(manager.initialize());
+    EXPECT_TRUE(optManager->initialize());
 
-    NTSTATUS status = manager.invoke<NTSTATUS>(
+    NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtClose"),
         reinterpret_cast<HANDLE>(0xDEADBEEF)
     );
@@ -573,15 +551,15 @@ TEST_F(SyscallPolicyTest, MemoryAllocatorWithSignatureParser)
 #if SYSCALL_PLATFORM_WINDOWS_64
 TEST_F(SyscallPolicyTest, GadgetGeneratorWithSignatureParser)
 {
-    syscall::Manager<
+    std::optional optManager = syscall::Manager<
         syscall::policies::allocator::section,
         syscall::policies::generator::gadget,
         syscall::policies::parser::signature
-    > manager;
+    >::initialize();
 
-    EXPECT_TRUE(manager.initialize());
+    EXPECT_TRUE(optManager.has_value());
 
-    NTSTATUS status = manager.invoke<NTSTATUS>(
+    NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtClose"),
         reinterpret_cast<HANDLE>(0xDEADBEEF)
     );
@@ -591,15 +569,15 @@ TEST_F(SyscallPolicyTest, GadgetGeneratorWithSignatureParser)
 
 TEST_F(SyscallPolicyTest, ExceptionGeneratorWithSignatureParser)
 {
-    syscall::Manager<
+    std::optional optManager = syscall::Manager<
         syscall::policies::allocator::section,
         syscall::policies::generator::exception,
         syscall::policies::parser::signature
-    > manager;
+    >::initialize();
 
-    EXPECT_TRUE(manager.initialize());
+    EXPECT_TRUE(optManager.has_value());
 
-    NTSTATUS status = manager.invoke<NTSTATUS>(
+    NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtClose"),
         reinterpret_cast<HANDLE>(0xDEADBEEF)
     );
@@ -608,50 +586,17 @@ TEST_F(SyscallPolicyTest, ExceptionGeneratorWithSignatureParser)
 }
 #endif
 
-TEST_F(SyscallPolicyTest, InvokeWithoutInitialize)
-{
-    syscall::SectionDirectManager manager;
-
-    PVOID pBaseAddress = nullptr;
-    SIZE_T uRegionSize = 0x1000;
-
-    NTSTATUS status = manager.invoke<NTSTATUS>(
-        SYSCALL_ID("NtAllocateVirtualMemory"),
-        syscall::native::getCurrentProcess(),
-        &pBaseAddress,
-        0,
-        &uRegionSize,
-        MEM_COMMIT | MEM_RESERVE,
-        PAGE_READWRITE
-    );
-
-    EXPECT_TRUE(NT_SUCCESS(status));
-    EXPECT_NE(pBaseAddress, nullptr);
-
-    if (pBaseAddress)
-    {
-        uRegionSize = 0;
-        manager.invoke<NTSTATUS>(
-            SYSCALL_ID("NtFreeVirtualMemory"),
-            syscall::native::getCurrentProcess(),
-            &pBaseAddress,
-            &uRegionSize,
-            MEM_RELEASE
-        );
-    }
-}
-
 TEST_F(SyscallPolicyTest, MultipleSyscallsSequentially)
 {
-    syscall::SectionDirectManager manager;
-    ASSERT_TRUE(manager.initialize());
+    std::optional optManager = syscall::SectionDirectManager::initialize();
+    ASSERT_TRUE(optManager.has_value());
 
     for (int i = 0; i < 100; ++i)
     {
         PVOID pBaseAddress = nullptr;
         SIZE_T uRegionSize = 0x1000;
 
-        NTSTATUS status = manager.invoke<NTSTATUS>(
+        NTSTATUS status = optManager->invoke<NTSTATUS>(
             SYSCALL_ID("NtAllocateVirtualMemory"),
             syscall::native::getCurrentProcess(),
             &pBaseAddress,
@@ -666,7 +611,7 @@ TEST_F(SyscallPolicyTest, MultipleSyscallsSequentially)
         if (pBaseAddress)
         {
             uRegionSize = 0;
-            manager.invoke<NTSTATUS>(
+            optManager->invoke<NTSTATUS>(
                 SYSCALL_ID("NtFreeVirtualMemory"),
                 syscall::native::getCurrentProcess(),
                 &pBaseAddress,
@@ -679,13 +624,13 @@ TEST_F(SyscallPolicyTest, MultipleSyscallsSequentially)
 
 TEST_F(SyscallPolicyTest, NtProtectVirtualMemory)
 {
-    syscall::SectionDirectManager manager;
-    ASSERT_TRUE(manager.initialize());
+    std::optional optManager = syscall::SectionDirectManager::initialize();
+    ASSERT_TRUE(optManager.has_value());
 
     PVOID pBaseAddress = nullptr;
     SIZE_T uRegionSize = 0x1000;
 
-    NTSTATUS status = manager.invoke<NTSTATUS>(
+    NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtAllocateVirtualMemory"),
         syscall::native::getCurrentProcess(),
         &pBaseAddress,
@@ -702,7 +647,7 @@ TEST_F(SyscallPolicyTest, NtProtectVirtualMemory)
     SIZE_T uProtectSize = 0x1000;
     PVOID pProtectAddress = pBaseAddress;
 
-    status = manager.invoke<NTSTATUS>(
+    status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtProtectVirtualMemory"),
         syscall::native::getCurrentProcess(),
         &pProtectAddress,
@@ -715,7 +660,7 @@ TEST_F(SyscallPolicyTest, NtProtectVirtualMemory)
     EXPECT_EQ(uOldProtect, PAGE_READWRITE);
 
     uRegionSize = 0;
-    manager.invoke<NTSTATUS>(
+    optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtFreeVirtualMemory"),
         syscall::native::getCurrentProcess(),
         &pBaseAddress,
@@ -726,13 +671,13 @@ TEST_F(SyscallPolicyTest, NtProtectVirtualMemory)
 
 TEST_F(SyscallPolicyTest, NtQueryVirtualMemory)
 {
-    syscall::SectionDirectManager manager;
-    ASSERT_TRUE(manager.initialize());
+    std::optional optManager = syscall::SectionDirectManager::initialize();
+    ASSERT_TRUE(optManager.has_value());
 
     PVOID pBaseAddress = nullptr;
     SIZE_T uRegionSize = 0x1000;
 
-    NTSTATUS status = manager.invoke<NTSTATUS>(
+    NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtAllocateVirtualMemory"),
         syscall::native::getCurrentProcess(),
         &pBaseAddress,
@@ -747,7 +692,7 @@ TEST_F(SyscallPolicyTest, NtQueryVirtualMemory)
     MEMORY_BASIC_INFORMATION memInfo{};
     SIZE_T uReturnLength = 0;
 
-    status = manager.invoke<NTSTATUS>(
+    status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtQueryVirtualMemory"),
         syscall::native::getCurrentProcess(),
         pBaseAddress,
@@ -763,7 +708,7 @@ TEST_F(SyscallPolicyTest, NtQueryVirtualMemory)
     EXPECT_EQ(memInfo.State, MEM_COMMIT);
 
     uRegionSize = 0;
-    manager.invoke<NTSTATUS>(
+    optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtFreeVirtualMemory"),
         syscall::native::getCurrentProcess(),
         &pBaseAddress,

@@ -17,7 +17,7 @@ namespace syscall::native
     }
 
     
-    [[nodiscard]] constexpr HANDLE getCurrentProcess() noexcept
+    [[nodiscard]] static HANDLE getCurrentProcess() noexcept
     {
         return reinterpret_cast<HANDLE>(-1);
     }

@@ -254,7 +254,11 @@ TEST(ManagerOwnershipTest, MoveAssignmentWorks)
     std::optional<syscall::SectionDirectManager> manager1 = syscall::SectionDirectManager::initialize();
     ASSERT_TRUE(manager1.has_value());
 
-    syscall::SectionDirectManager manager2 = std::move(manager1.value());
+    auto destination = syscall::SectionDirectManager::initialize();
+    ASSERT_TRUE(destination.has_value());
+
+    auto& manager2 = destination.value();
+    manager2 = std::move(manager1.value());
 
     PVOID pAddress = nullptr;
     SIZE_T uRegionSize = 0x1000;
@@ -538,7 +542,7 @@ TEST_F(SyscallPolicyTest, MemoryAllocatorWithSignatureParser)
         syscall::policies::parser::signature
     >::initialize();
 
-    EXPECT_TRUE(optManager->initialize());
+    ASSERT_TRUE(optManager.has_value());
 
     NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtClose"),

@@ -12,6 +12,9 @@ namespace syscall
     class Manager<AllocPolicy, StubPolicy>
         : public Manager<AllocPolicy, StubPolicy, syscall::policies::parser::directory, syscall::policies::parser::signature>
     {
+        Manager(Manager<AllocPolicy, StubPolicy, syscall::policies::parser::directory, syscall::policies::parser::signature>&& manager)
+            : Manager<AllocPolicy, StubPolicy, syscall::policies::parser::directory, syscall::policies::parser::signature>(std::move(manager))
+        { }
     public:
         static std::optional<Manager> initialize( const std::vector<SyscallKey_t>& vecModuleKeys = { SYSCALL_ID("ntdll.dll") } )
         {

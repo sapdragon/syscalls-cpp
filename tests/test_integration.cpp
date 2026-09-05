@@ -83,7 +83,9 @@ protected:
 
     void SetUp() override
     {
-        optManager = syscall::SectionDirectManager::initialize();
+        auto manager = syscall::SectionDirectManager::initialize();
+        ASSERT_TRUE(manager.has_value());
+        optManager.emplace(std::move(manager.value()));
         ASSERT_TRUE(optManager.has_value());
     }
 };
@@ -249,16 +251,12 @@ TEST_F(NativeApiTest, RdtscpReturnsValue)
     EXPECT_NE(uValue1, 0u);
 }
 
-TEST(ManagerOwnershipTest, MoveAssignmentWorks)
+TEST(ManagerOwnershipTest, MoveConstructionWorks)
 {
     std::optional<syscall::SectionDirectManager> manager1 = syscall::SectionDirectManager::initialize();
     ASSERT_TRUE(manager1.has_value());
 
-    auto destination = syscall::SectionDirectManager::initialize();
-    ASSERT_TRUE(destination.has_value());
-
-    auto& manager2 = destination.value();
-    manager2 = std::move(manager1.value());
+    syscall::SectionDirectManager manager2 = std::move(manager1.value());
 
     PVOID pAddress = nullptr;
     SIZE_T uRegionSize = 0x1000;

@@ -46,8 +46,6 @@ namespace syscall::policies::allocator
                 return false;
             }
 
-            FlushInstructionCache(GetCurrentProcess(), pOutRegion, uRegionSize);
-
             return true;
         }
 

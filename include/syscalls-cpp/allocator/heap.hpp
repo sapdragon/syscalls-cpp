@@ -43,7 +43,6 @@ namespace syscall::policies::allocator
             }
 
             std::copy_n(vecBuffer.data(), uRegionSize, static_cast<uint8_t*>(pOutRegion));
-            FlushInstructionCache(GetCurrentProcess(), pOutRegion, uRegionSize);
             return true;
         }
 

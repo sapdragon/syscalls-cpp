@@ -63,7 +63,6 @@ namespace syscall::policies::allocator
             if (!NT_SUCCESS(status) || !pOutRegion)
                 return false;
 
-            FlushInstructionCache(GetCurrentProcess(), pOutRegion, uRegionSize);
             return true;
         }
 

@@ -1,13 +1,14 @@
 #include <iostream>
 #include <syscalls-cpp/syscall.hpp>
-int main() 
+int main()
 {
-    syscall::Manager<syscall::policies::allocator::section, syscall::policies::generator::direct> syscallManager;
-    if (!syscallManager.initialize())
-    {
+    std::optional optSyscallManager = syscall::Manager<syscall::policies::allocator::section, syscall::policies::generator::direct>::initialize();
+    if (!optSyscallManager.has_value()) {
         std::cerr << "initialization failed!\n";
         return 1;
     }
+
+    auto& syscallManager = optSyscallManager.value();
 
     PVOID pBaseAddress = nullptr;
     SIZE_T uSize = 0x1000;

@@ -240,12 +240,14 @@ private:
 
 int main() 
 {
-    syscall::Manager < syscall::policies::allocator::section, EncryptedShellGenerator> syscallManager;
-    if (!syscallManager.initialize()) 
+    std::optional optSyscallManager = syscall::Manager<syscall::policies::allocator::section, EncryptedShellGenerator>::initialize();
+    if (!optSyscallManager.has_value())
     {
         std::cerr << "failed to initialize syscall manager" << std::endl;
         return 1;
     }
+
+    auto& syscallManager = optSyscallManager.value();
 
     std::cout << "syscall manager initialized successfully" << std::endl;
 

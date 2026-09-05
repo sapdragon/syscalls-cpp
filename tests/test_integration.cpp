@@ -8,21 +8,21 @@ TEST_F(SyscallManagerTest, InitializesWithSectionDirect)
 {
     std::optional optManager = syscall::Manager<syscall::policies::allocator::section, syscall::policies::generator::direct>::initialize();
 
-    EXPECT_TRUE(optManager.has_value());
+    ASSERT_TRUE(optManager.has_value());
 }
 
 TEST_F(SyscallManagerTest, InitializesWithHeapDirect)
 {
     std::optional optManager = syscall::Manager<syscall::policies::allocator::heap, syscall::policies::generator::direct>::initialize();
 
-    EXPECT_TRUE(optManager.has_value());
+    ASSERT_TRUE(optManager.has_value());
 }
 
 TEST_F(SyscallManagerTest, InitializesWithMemoryDirect)
 {
     std::optional optManager = syscall::Manager<syscall::policies::allocator::memory, syscall::policies::generator::direct>::initialize();
 
-    EXPECT_TRUE(optManager.has_value());
+    ASSERT_TRUE(optManager.has_value());
 }
 
 #if SYSCALL_PLATFORM_WINDOWS_64
@@ -30,14 +30,14 @@ TEST_F(SyscallManagerTest, InitializesWithGadgetX64)
 {
     std::optional optManager = syscall::Manager<syscall::policies::allocator::section, syscall::policies::generator::gadget>::initialize();
 
-    EXPECT_TRUE(optManager.has_value());
+    ASSERT_TRUE(optManager.has_value());
 }
 
 TEST_F(SyscallManagerTest, InitializesWithExceptionX64)
 {
     std::optional optManager = syscall::Manager<syscall::policies::allocator::section, syscall::policies::generator::exception>::initialize();
 
-    EXPECT_TRUE(optManager.has_value());
+    ASSERT_TRUE(optManager.has_value());
 }
 #endif
 
@@ -462,7 +462,7 @@ TEST_F(SyscallPolicyTest, SignatureParserDirect)
         syscall::policies::parser::signature
     >::initialize();
 
-    EXPECT_TRUE(optManager.has_value());
+    ASSERT_TRUE(optManager.has_value());
 
     PVOID pBaseAddress = nullptr;
     SIZE_T uRegionSize = 0x1000;
@@ -500,7 +500,7 @@ TEST_F(SyscallPolicyTest, DirectoryParserDirect)
         syscall::policies::parser::directory
     >::initialize();
 
-    EXPECT_TRUE(optManager.has_value());
+    ASSERT_TRUE(optManager.has_value());
 
     NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtClose"),
@@ -518,7 +518,7 @@ TEST_F(SyscallPolicyTest, HeapAllocatorWithSignatureParser)
          syscall::policies::parser::signature
      >::initialize();
 
-    EXPECT_TRUE(optManager.has_value());
+    ASSERT_TRUE(optManager.has_value());
 
     ULONG uReturnLength = 0;
     NTSTATUS status = optManager->invoke<NTSTATUS>(
@@ -559,7 +559,7 @@ TEST_F(SyscallPolicyTest, GadgetGeneratorWithSignatureParser)
         syscall::policies::parser::signature
     >::initialize();
 
-    EXPECT_TRUE(optManager.has_value());
+    ASSERT_TRUE(optManager.has_value());
 
     NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtClose"),
@@ -577,7 +577,7 @@ TEST_F(SyscallPolicyTest, ExceptionGeneratorWithSignatureParser)
         syscall::policies::parser::signature
     >::initialize();
 
-    EXPECT_TRUE(optManager.has_value());
+    ASSERT_TRUE(optManager.has_value());
 
     NTSTATUS status = optManager->invoke<NTSTATUS>(
         SYSCALL_ID("NtClose"),

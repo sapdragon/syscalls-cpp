@@ -283,6 +283,14 @@ namespace syscall
             if (vecParsedSyscalls.empty())
                 return std::nullopt;
 
+            const size_t uStubSize = IStubGenerationPolicy::getStubSize();
+            if (!uStubSize || vecParsedSyscalls.size() > SIZE_MAX / uStubSize)
+                return std::nullopt;
+
+            const size_t uRegionSize = vecParsedSyscalls.size() * uStubSize;
+            if (uRegionSize > UINT32_MAX)
+                return std::nullopt;
+
             std::ranges::sort(vecParsedSyscalls, std::less{}, &SyscallEntry_t::m_key);
 
             for (size_t i = 1; i < vecParsedSyscalls.size(); ++i)
@@ -311,7 +319,7 @@ namespace syscall
                     std::swap(vecParsedSyscalls[i], vecParsedSyscalls[native::rdtscp() % (i + 1)]);
 
             for (size_t i = 0; i < vecParsedSyscalls.size(); ++i)
-                vecParsedSyscalls[i].m_uOffset = static_cast<uint32_t>(i * IStubGenerationPolicy::getStubSize());
+                vecParsedSyscalls[i].m_uOffset = static_cast<uint32_t>(i * uStubSize);
 
             std::ranges::sort(vecParsedSyscalls, std::less{}, &SyscallEntry_t::m_key);
 

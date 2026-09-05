@@ -60,7 +60,11 @@ namespace syscall::policies::allocator
             uViewSize = uRegionSize;
             status = fNtMapView(hSectionHandle, native::getCurrentProcess(), &pOutRegion, 0, 0, nullptr, &uViewSize, native::ESectionInherit::VIEW_SHARE, 0, PAGE_EXECUTE_READ);
             fNtClose(hSectionHandle);
-            return NT_SUCCESS(status) && pOutRegion;
+            if (!NT_SUCCESS(status) || !pOutRegion)
+                return false;
+
+            FlushInstructionCache(GetCurrentProcess(), pOutRegion, uRegionSize);
+            return true;
         }
 
         static void release(void* pRegion, HANDLE /*hHeapHandle*/)

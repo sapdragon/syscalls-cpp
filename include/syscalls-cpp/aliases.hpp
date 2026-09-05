@@ -16,7 +16,7 @@ namespace syscall
             : Manager<AllocPolicy, StubPolicy, syscall::policies::parser::directory, syscall::policies::parser::signature>(std::move(manager))
         { }
     public:
-        static std::optional<Manager> initialize( const std::vector<SyscallKey_t>& vecModuleKeys = { SYSCALL_ID("ntdll.dll") } )
+        static std::optional<Manager> create(const std::vector<SyscallKey_t>& vecModuleKeys = { SYSCALL_ID("ntdll.dll") })
         {
             std::optional optManager = Manager<AllocPolicy, StubPolicy, syscall::policies::parser::directory, syscall::policies::parser::signature>::initialize(vecModuleKeys);
 
@@ -24,6 +24,11 @@ namespace syscall
                 return std::nullopt;
 
             return Manager(std::move(optManager.value()));
+        }
+
+        static std::optional<Manager> initialize(const std::vector<SyscallKey_t>& vecModuleKeys = { SYSCALL_ID("ntdll.dll") })
+        {
+            return create(vecModuleKeys);
         }
     };
 
@@ -35,13 +40,18 @@ namespace syscall
             : ManagerImpl<AllocPolicy, StubPolicy, ParsersInChain...>(std::move(managerImpl))
         { }
     public:
-        static std::optional<Manager> initialize(const std::vector<SyscallKey_t>& vecModuleKeys = { SYSCALL_ID("ntdll.dll") })
+        static std::optional<Manager> create(const std::vector<SyscallKey_t>& vecModuleKeys = { SYSCALL_ID("ntdll.dll") })
         {
             std::optional optManagerImpl = ManagerImpl<AllocPolicy, StubPolicy, ParsersInChain...>::initialize(vecModuleKeys);
             if (!optManagerImpl.has_value())
                 return std::nullopt;
 
             return Manager(std::move(optManagerImpl.value()));
+        }
+
+        static std::optional<Manager> initialize(const std::vector<SyscallKey_t>& vecModuleKeys = { SYSCALL_ID("ntdll.dll") })
+        {
+            return create(vecModuleKeys);
         }
     };
 

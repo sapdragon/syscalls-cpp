@@ -25,6 +25,25 @@ TEST_F(SyscallManagerTest, InitializesWithMemoryDirect)
     ASSERT_TRUE(optManager.has_value());
 }
 
+TEST_F(SyscallManagerTest, EmptyModuleListFails)
+{
+    const std::vector<syscall::SyscallKey_t> modules;
+    auto optManager = syscall::SectionDirectManager::create(modules);
+
+    EXPECT_FALSE(optManager.has_value());
+}
+
+TEST_F(SyscallManagerTest, DuplicateModuleKeysAreAccepted)
+{
+    const std::vector<syscall::SyscallKey_t> modules = {
+        SYSCALL_ID("ntdll.dll"),
+        SYSCALL_ID("ntdll.dll")
+    };
+    auto optManager = syscall::SectionDirectManager::create(modules);
+
+    EXPECT_TRUE(optManager.has_value());
+}
+
 #if SYSCALL_PLATFORM_WINDOWS_64
 TEST_F(SyscallManagerTest, InitializesWithGadgetX64)
 {

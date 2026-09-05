@@ -36,6 +36,63 @@ namespace syscall::native
             char* m_pszFuncName;
         };
 
+        struct ExportTable_t
+        {
+            uint8_t* m_pBase = nullptr;
+            PIMAGE_NT_HEADERS m_pNtHeaders = nullptr;
+            PIMAGE_EXPORT_DIRECTORY m_pDirectory = nullptr;
+            uint32_t* m_pNames = nullptr;
+            uint16_t* m_pOrdinals = nullptr;
+            uint32_t* m_pFunctions = nullptr;
+            uint32_t m_uImageSize = 0;
+            uint32_t m_uExportStart = 0;
+            uint32_t m_uExportEnd = 0;
+        };
+
+        inline bool isRvaRangeValid(uint32_t uRva, uint64_t uSize, uint32_t uImageSize)
+        {
+            return uRva <= uImageSize && uSize <= static_cast<uint64_t>(uImageSize - uRva);
+        }
+
+        inline bool getExportTable(HMODULE hModuleBase, ExportTable_t& outTable)
+        {
+            if (!hModuleBase)
+                return false;
+
+            outTable.m_pBase = reinterpret_cast<uint8_t*>(hModuleBase);
+            auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(outTable.m_pBase);
+            if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE || pDosHeader->e_lfanew < 0 || pDosHeader->e_lfanew > 0x100000)
+                return false;
+
+            outTable.m_pNtHeaders = reinterpret_cast<PIMAGE_NT_HEADERS>(outTable.m_pBase + pDosHeader->e_lfanew);
+            if (outTable.m_pNtHeaders->Signature != IMAGE_NT_SIGNATURE)
+                return false;
+
+            outTable.m_uImageSize = outTable.m_pNtHeaders->OptionalHeader.SizeOfImage;
+            const auto& exportData = outTable.m_pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT];
+            if (!outTable.m_uImageSize || !exportData.VirtualAddress || !exportData.Size ||
+                !isRvaRangeValid(exportData.VirtualAddress, exportData.Size, outTable.m_uImageSize) ||
+                exportData.Size < sizeof(IMAGE_EXPORT_DIRECTORY))
+                return false;
+
+            outTable.m_uExportStart = exportData.VirtualAddress;
+            outTable.m_uExportEnd = exportData.VirtualAddress + exportData.Size;
+            outTable.m_pDirectory = reinterpret_cast<PIMAGE_EXPORT_DIRECTORY>(outTable.m_pBase + exportData.VirtualAddress);
+
+            const uint64_t nameBytes = static_cast<uint64_t>(outTable.m_pDirectory->NumberOfNames) * sizeof(uint32_t);
+            const uint64_t ordinalBytes = static_cast<uint64_t>(outTable.m_pDirectory->NumberOfNames) * sizeof(uint16_t);
+            const uint64_t functionBytes = static_cast<uint64_t>(outTable.m_pDirectory->NumberOfFunctions) * sizeof(uint32_t);
+            if (!isRvaRangeValid(outTable.m_pDirectory->AddressOfNames, nameBytes, outTable.m_uImageSize) ||
+                !isRvaRangeValid(outTable.m_pDirectory->AddressOfNameOrdinals, ordinalBytes, outTable.m_uImageSize) ||
+                !isRvaRangeValid(outTable.m_pDirectory->AddressOfFunctions, functionBytes, outTable.m_uImageSize))
+                return false;
+
+            outTable.m_pNames = reinterpret_cast<uint32_t*>(outTable.m_pBase + outTable.m_pDirectory->AddressOfNames);
+            outTable.m_pOrdinals = reinterpret_cast<uint16_t*>(outTable.m_pBase + outTable.m_pDirectory->AddressOfNameOrdinals);
+            outTable.m_pFunctions = reinterpret_cast<uint32_t*>(outTable.m_pBase + outTable.m_pDirectory->AddressOfFunctions);
+            return true;
+        }
+
 
         inline bool parseForwarderString(const uint8_t* pBase, uint32_t uFunctionRva, ForwarderInfo_t& outInfo)
         {
@@ -43,6 +100,7 @@ namespace syscall::native
             char*       szDest    = outInfo.m_szDllName;
             const char* szDestEnd = szDest + sizeof(outInfo.m_szDllName) - 1;
             char*       pszDot    = nullptr;
+            bool        bTerminated = false;
 
             while (szDest < szDestEnd && (*szDest = *szSrc++))
             {
@@ -51,6 +109,12 @@ namespace syscall::native
 
                 szDest++;
             }
+
+            if (szDest < szDestEnd)
+                bTerminated = (*szDest == '\0');
+
+            if (!bTerminated)
+                return false;
 
             *szDest = '\0';
 
@@ -186,6 +250,10 @@ namespace syscall::native
         if (!hModuleBase || !szExportName)
             return nullptr;
 
+        detail::ExportTable_t exportTable;
+        if (!detail::getExportTable(hModuleBase, exportTable))
+            return nullptr;
+
         auto pBase = reinterpret_cast<uint8_t*>(hModuleBase);
         auto pDosHeader = reinterpret_cast<PIMAGE_DOS_HEADER>(pBase);
         if (pDosHeader->e_magic != IMAGE_DOS_SIGNATURE)
@@ -211,12 +279,17 @@ namespace syscall::native
                 continue;
 
             const uint16_t usOrdinal = pOrdinalsRVA[i];
+            if (usOrdinal >= pExportDir->NumberOfFunctions)
+                return nullptr;
+
             const uint32_t uFunctionRva = pFunctionsRVA[usOrdinal];
             auto uExportSectionStart = uExportDirRva;
             auto uExportSectionEnd = uExportSectionStart + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
             if (uFunctionRva < uExportSectionStart || uFunctionRva >= uExportSectionEnd)
-                return pBase + uFunctionRva;
+                return detail::isRvaRangeValid(uFunctionRva, 1, exportTable.m_uImageSize)
+                    ? pBase + uFunctionRva
+                    : nullptr;
 
             detail::ForwarderInfo_t forwarderInfo;
             if (!detail::parseForwarderString(pBase, uFunctionRva, forwarderInfo))
@@ -241,6 +314,10 @@ namespace syscall::native
     inline void* getExportAddress(HMODULE hModuleBase, hashing::Hash_t uExportHash)
     {
         if (!hModuleBase)
+            return nullptr;
+
+        detail::ExportTable_t exportTable;
+        if (!detail::getExportTable(hModuleBase, exportTable))
             return nullptr;
 
         auto pBase = reinterpret_cast<uint8_t*>(hModuleBase);
@@ -269,12 +346,17 @@ namespace syscall::native
                 continue;
 
             uint16_t usOrdinal = pOrdinalsRVA[i];
+            if (usOrdinal >= pExportDir->NumberOfFunctions)
+                return nullptr;
+
             uint32_t uFunctionRva = pFunctionsRVA[usOrdinal];
             auto uExportSectionStart = uExportDirRva;
             auto uExportSectionEnd = uExportSectionStart + pNtHeaders->OptionalHeader.DataDirectory[IMAGE_DIRECTORY_ENTRY_EXPORT].Size;
 
             if (uFunctionRva < uExportSectionStart || uFunctionRva >= uExportSectionEnd)
-                return pBase + uFunctionRva;
+                return detail::isRvaRangeValid(uFunctionRva, 1, exportTable.m_uImageSize)
+                    ? pBase + uFunctionRva
+                    : nullptr;
 
             detail::ForwarderInfo_t forwarderInfo;
             if (!detail::parseForwarderString(pBase, uFunctionRva, forwarderInfo))

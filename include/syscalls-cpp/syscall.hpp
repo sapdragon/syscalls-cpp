@@ -141,18 +141,18 @@ namespace syscall
         }
     }
 
-    template<typename T>
+    template<typename T, typename = void>
     struct GeneratorTraits
     {
         static constexpr bool bRequiresGadget = T::bRequiresGadget;
         static constexpr bool bRequiresExceptionDispatch = false;
     };
 
-    template<>
-    struct GeneratorTraits<policies::generator::exception>
+    template<typename T>
+    struct GeneratorTraits<T, std::void_t<decltype(T::bRequiresExceptionDispatch)>>
     {
-        static constexpr bool bRequiresGadget = policies::generator::exception::bRequiresGadget;
-        static constexpr bool bRequiresExceptionDispatch = true;
+        static constexpr bool bRequiresGadget = T::bRequiresGadget;
+        static constexpr bool bRequiresExceptionDispatch = T::bRequiresExceptionDispatch;
     };
 
     template<typename T>

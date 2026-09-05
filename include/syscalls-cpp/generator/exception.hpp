@@ -10,6 +10,7 @@ namespace syscall::policies::generator
     struct exception
     {
         static constexpr bool bRequiresGadget = true;
+        static constexpr bool bRequiresExceptionDispatch = true;
         static constexpr size_t getStubSize() { return 8; }
         static void generate(uint8_t* pBuffer, uint32_t /*uSyscallNumber*/, void* /*pGadgetAddress*/)
         {

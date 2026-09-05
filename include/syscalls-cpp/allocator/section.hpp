@@ -16,6 +16,10 @@ namespace syscall::policies::allocator
     {
         static bool allocate(size_t uRegionSize, const std::span<const uint8_t> vecBuffer, void*& pOutRegion, HANDLE& /*unused*/)
         {
+            pOutRegion = nullptr;
+            if (!uRegionSize || vecBuffer.size() < uRegionSize)
+                return false;
+
             HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
 
             auto fNtCreateSection = reinterpret_cast<native::NtCreateSection_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtCreateSection")));
@@ -46,7 +50,13 @@ namespace syscall::policies::allocator
             }
 
             std::copy_n(vecBuffer.data(), uRegionSize, static_cast<uint8_t*>(pTempView));
-            fNtUnmapView(native::getCurrentProcess(), pTempView);
+            status = fNtUnmapView(native::getCurrentProcess(), pTempView);
+            if (!NT_SUCCESS(status))
+            {
+                fNtClose(hSectionHandle);
+                return false;
+            }
+
             uViewSize = uRegionSize;
             status = fNtMapView(hSectionHandle, native::getCurrentProcess(), &pOutRegion, 0, 0, nullptr, &uViewSize, native::ESectionInherit::VIEW_SHARE, 0, PAGE_EXECUTE_READ);
             fNtClose(hSectionHandle);

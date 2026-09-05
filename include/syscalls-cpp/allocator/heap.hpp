@@ -16,6 +16,11 @@ namespace syscall::policies::allocator
     {
         static bool allocate(size_t uRegionSize, const std::span<const uint8_t> vecBuffer, void*& pOutRegion, HANDLE& hOutHeapHandle)
         {
+            pOutRegion = nullptr;
+            hOutHeapHandle = nullptr;
+            if (!uRegionSize || vecBuffer.size() < uRegionSize)
+                return false;
+
             HMODULE hNtdll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
             if (!hNtdll)
                 return false;

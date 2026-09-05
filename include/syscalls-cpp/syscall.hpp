@@ -283,6 +283,29 @@ namespace syscall
             if (vecParsedSyscalls.empty())
                 return std::nullopt;
 
+            std::ranges::sort(vecParsedSyscalls, std::less{}, &SyscallEntry_t::m_key);
+
+            for (size_t i = 1; i < vecParsedSyscalls.size(); ++i)
+            {
+                if (vecParsedSyscalls[i - 1].m_key != vecParsedSyscalls[i].m_key)
+                    continue;
+
+                if (vecParsedSyscalls[i - 1].m_uSyscallNumber != vecParsedSyscalls[i].m_uSyscallNumber)
+                    return std::nullopt;
+            }
+
+            vecParsedSyscalls.erase(
+                std::unique(
+                    vecParsedSyscalls.begin(),
+                    vecParsedSyscalls.end(),
+                    [](const SyscallEntry_t& lhs, const SyscallEntry_t& rhs)
+                    {
+                        return lhs.m_key == rhs.m_key;
+                    }
+                ),
+                vecParsedSyscalls.end()
+            );
+
             if (vecParsedSyscalls.size() > 1)
                 for (size_t i = vecParsedSyscalls.size() - 1; i > 0; --i)
                     std::swap(vecParsedSyscalls[i], vecParsedSyscalls[native::rdtscp() % (i + 1)]);
@@ -290,8 +313,8 @@ namespace syscall
             for (size_t i = 0; i < vecParsedSyscalls.size(); ++i)
                 vecParsedSyscalls[i].m_uOffset = static_cast<uint32_t>(i * IStubGenerationPolicy::getStubSize());
 
-
             std::ranges::sort(vecParsedSyscalls, std::less{}, &SyscallEntry_t::m_key);
+
 
             std::optional<SyscallInitInfo_t> optSyscallInitInfo = createSyscalls(vecParsedSyscalls, vecSyscallGadgets);
             if (!optSyscallInitInfo.has_value())

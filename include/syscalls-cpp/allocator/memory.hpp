@@ -16,6 +16,10 @@ namespace syscall::policies::allocator
     {
         static bool allocate(size_t uRegionSize, const std::span<const uint8_t> vecBuffer, void*& pOutRegion, HANDLE& /*unused*/)
         {
+            pOutRegion = nullptr;
+            if (!uRegionSize || vecBuffer.size() < uRegionSize)
+                return false;
+
             HMODULE hNtDll = native::getModuleBase(hashing::calculateHash("ntdll.dll"));
 
             auto fNtAllocate = reinterpret_cast<native::NtAllocateVirtualMemory_t>(native::getExportAddress(hNtDll, SYSCALL_ID("NtAllocateVirtualMemory")));
@@ -23,7 +27,6 @@ namespace syscall::policies::allocator
             if (!fNtAllocate || !fNtProtect)
                 return false;
 
-            pOutRegion = nullptr;
             SIZE_T uSize = uRegionSize;
             NTSTATUS status = fNtAllocate(native::getCurrentProcess(), &pOutRegion, 0, &uSize, MEM_COMMIT | MEM_RESERVE, PAGE_READWRITE);
 

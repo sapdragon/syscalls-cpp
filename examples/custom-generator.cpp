@@ -11,11 +11,12 @@
 #include <chrono>
 #include <initializer_list>
 #include <cstring> 
+#include <stdexcept>
 
 class CBufferWriter 
 {
 public:
-    CBufferWriter(uint8_t* buffer, size_t size) : m_pStart(buffer), m_pCurrent(buffer), m_pEnd(buffer + size) 
+    CBufferWriter(uint8_t* buffer, size_t size) : m_pStart(buffer), m_pCurrent(buffer), m_pEnd(buffer + size)
     {
 
     }
@@ -25,9 +26,11 @@ public:
     {
         if (m_pCurrent + sizeof(T) <= m_pEnd)
         {
-            *reinterpret_cast<T*>(m_pCurrent) = value;
+            std::memcpy(m_pCurrent, &value, sizeof(T));
             m_pCurrent += sizeof(T);
         }
+        else
+            m_bOverflowed = true;
     }
 
     void writeBytes(std::initializer_list<uint8_t> listBytes) {
@@ -36,10 +39,16 @@ public:
             memcpy(m_pCurrent, listBytes.begin(), listBytes.size());
             m_pCurrent += listBytes.size();
         }
+        else
+            m_bOverflowed = true;
     }
 
     size_t getCurrentSize() const {
         return m_pCurrent - m_pStart;
+    }
+
+    bool hasOverflowed() const {
+        return m_bOverflowed;
     }
 
     void fillRest(uint8_t uValue) 
@@ -53,13 +62,14 @@ private:
     uint8_t* m_pStart;
     uint8_t* m_pCurrent;
     const uint8_t* m_pEnd;
+    bool m_bOverflowed = false;
 };
 
 
 struct EncryptedShellGenerator
 {
     static constexpr bool bRequiresGadget = false;
-    static constexpr size_t kMaxStubSize = 128;
+    static constexpr size_t kMaxStubSize = 256;
 
 private:
     enum class EOperationType { ADD, SUB, XOR, NOT, NEG, ROL, ROR };
@@ -164,6 +174,9 @@ public:
         writer.writeBytes({ 0xFF, 0x64, 0x24, 0xF8 });     // jmp qword ptr [rsp-8]
 
         writer.fillRest(0xCC); // int3
+
+        if (writer.hasOverflowed())
+            throw std::runtime_error("custom syscall stub exceeded kMaxStubSize");
     }
 
     static constexpr size_t getStubSize() { return kMaxStubSize; }
